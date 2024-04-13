@@ -1,0 +1,11 @@
+.idea
+*.ko
+*.cmd
+*.symvers
+*.order
+*.o
+*.o.*
+*.mod
+*.mod.*
+.run
+*.img
