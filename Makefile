@@ -27,10 +27,7 @@ load:
 unload:
 	rmmod batch_syscalls
 
-
 .PHONY: test
 test: module
-	${MAKE} load
-	cd test && ((${MAKE} test && echo "test successful") || echo "test failed")
-	${MAKE} unload
-	${MAKE} clean
+	${MAKE} load || true
+	cd test && ((${MAKE} test && exit 0) || exit -1)
