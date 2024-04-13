@@ -28,6 +28,5 @@ unload:
 	rmmod batch_syscalls
 
 .PHONY: test
-test: module
-	${MAKE} load || true
+test:
 	cd test && ((${MAKE} test && exit 0) || exit -1)
