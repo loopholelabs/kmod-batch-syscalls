@@ -21,7 +21,7 @@ jobs:
         shell: bash
 
       - name: Load Module
-        run: make load
+        run: sudo make load
         shell: bash
 
       - name: Run Test
@@ -29,7 +29,7 @@ jobs:
         shell: bash
 
       - name: Unload Module
-        run: make unload
+        run: sudo make unload
         shell: bash
 
       - name: Cleanup Module
