@@ -3,9 +3,13 @@ all: test
 .PHONY: test
 test: generate
 	gcc test.c -I../ -o test
-	./test || true
-	rm -rf test *.bin
+	sudo ./test
+	${MAKE} clean
 
 .PHONY: generate
 generate:
-	go run generate.go
+	go run -exec sudo generate.go
+
+.PHONY: clean
+clean:
+	rm -rf test *.bin
