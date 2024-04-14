@@ -132,7 +132,7 @@ int main() {
 
     printf("mmap(\"overlay.bin\") (%i pages) took %lins\n", i, after.tv_nsec - before.tv_nsec);
 
-    printf("running sanity check to file contents\n");
+    printf("checking mmap buffer against file contents\n");
 
     char *buffer = malloc(page_size);
     memset(buffer, 0, page_size);

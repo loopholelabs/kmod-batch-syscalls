@@ -8,7 +8,7 @@ test: generate
 
 .PHONY: generate
 generate:
-	go run -exec sudo generate.go
+	go run generate.go
 
 .PHONY: clean
 clean:
