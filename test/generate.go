@@ -20,11 +20,14 @@ package main
 import (
 	"io"
 	"os"
+	"fmt"
 )
 
 func main() {
-	pageSize := 4096 * 64
-	totalSize := pageSize * 1024
+	pageSize := os.Getpagesize()
+	totalSize := pageSize * 1024 * 1024 * 4
+
+	fmt.Printf("using pageSize %d with totalSize %d\n", pageSize, totalSize)
 
 	{
 		out, err := os.OpenFile("base.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)

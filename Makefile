@@ -30,3 +30,7 @@ unload:
 .PHONY: test
 test:
 	cd test && ((${MAKE} test && exit 0) || exit -1)
+
+.PHONY: test-normal
+test-normal:
+	cd test && ((${MAKE} test-normal && exit 0) || exit -1)

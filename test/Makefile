@@ -6,10 +6,16 @@ test: generate
 	sudo ./test
 	${MAKE} clean
 
+.PHONY: test-normal
+test-normal: generate
+	gcc normal.c -I../ -o normal
+	sudo ./normal
+	${MAKE} clean
+
 .PHONY: generate
 generate:
 	go run generate.go
 
 .PHONY: clean
 clean:
-	rm -rf test *.bin
+	rm -rf test normal *.bin

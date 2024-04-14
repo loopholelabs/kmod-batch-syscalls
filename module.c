@@ -76,33 +76,41 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
                 break;
             }
             path[path_len-1] = '\0';
-            log_info("performing %d mmap operations for '%s' with flag %lu and prot %lu", mmap.size, path, mmap.flag, mmap.prot);
-            struct file* file_ptr = filp_open(path, mmap.mode, 0);
-            if(!file_ptr) {
-                log_error("unable to open file '%s' during mmap ioctl", path);
+            log_debug("opening file '%s' with mode %u (%u) during mmap ioctl", path, mmap.mode, mmap.mode | O_LARGEFILE);
+            struct file* file_ptr = filp_open(path, mmap.mode | O_LARGEFILE, 0);
+            if(IS_ERR(file_ptr)) {
+                log_error("unable to open file '%s' during mmap ioctl: %ld", path, PTR_ERR(file_ptr));
                 kfree(path);
                 break;
             }
-
-            struct mmap_element* elements = kmalloc(sizeof(struct mmap_element) * mmap.size, GFP_KERNEL);
+            log_info("performing %d mmap operations for '%s' with flag %lu and prot %lu during mmap ioctl", mmap.size, path, mmap.flag, mmap.prot);
+            log_debug("allocating %lu bytes for mmap elements", sizeof(struct mmap_element) * mmap.size);
+            struct mmap_element* elements = kvzalloc(sizeof(struct mmap_element) * mmap.size, GFP_KERNEL);
+            if(!elements) {
+                log_crit("unable to allocate elements variable during mmap ioctl");
+                fput(file_ptr);
+                kfree(path);
+                return -ENOMEM;
+            }
+            log_debug("copying %lu bytes from user for mmap ioctl with path '%s'", sizeof(struct mmap_element) * mmap.size, path);
+            ret = copy_from_user(elements, mmap.elements, sizeof(struct mmap_element) * mmap.size);
+            if(ret) {
+                log_error("unable to copy elements from user during mmap ioctl: %lu", ret);
+                kvfree(elements);
+                fput(file_ptr);
+                kfree(path);
+                break;
+            }
             for(unsigned int i = 0; i < mmap.size; i++) {
-                ret = copy_from_user(&elements[i], &mmap.elements[i], sizeof(struct mmap_element));
-                if(ret) {
-                    log_error("unable to copy element %u from user during mmap ioctl: %lu", i, ret);
-                    kfree(elements);
-                    fput(file_ptr);
-                    kfree(path);
-                    break;
-                }
-                log_debug("batch mmap ioctl with path '%s': addr %lu, len %lu, mode %u, and offset %lu", path, elements[i].addr, elements[i].len, mmap.mode, elements[i].offset);
+                log_debug("batch mmap ioctl with path '%s' for element %u: addr %lu, len %lu, prot %lu, flag %lu, and offset %lu", path, i, elements[i].addr, elements[i].len, mmap.prot, mmap.flag, elements[i].offset);
                 elements[i].ret = vm_mmap(file_ptr, elements[i].addr, elements[i].len, mmap.prot, mmap.flag, elements[i].offset);
-                log_info("successful mmap ioctl for element %u with path '%s' (addr %lu, len %lu, and offset %lu)", i, path, elements[i].addr, elements[i].len, elements[i].offset);
+                log_debug("successful mmap ioctl for element %u with path '%s' (addr %lu, len %lu, and offset %lu)", i, path, elements[i].addr, elements[i].len, elements[i].offset);
             }
 
             int close_ret = filp_close(file_ptr, NULL);
             if(close_ret) {
                 log_error("unable to close file '%s' during mmap ioctl", path);
-                kfree(elements);
+                kvfree(elements);
                 fput(file_ptr);
                 kfree(path);
                 break;
@@ -114,11 +122,11 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
                 ret = copy_to_user(&mmap.elements[i], &elements[i], sizeof(struct mmap_element));
                 if(ret) {
                     log_error("unable to copy element %u to user during mmap ioctl: %lu", i, ret);
-                    kfree(elements);
+                    kvfree(elements);
                     break;
                 }
             }
-            kfree(elements);
+            kvfree(elements);
 
             return 0;
         default:
