@@ -63,7 +63,7 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
 #ifdef BENCHMARK
             end = ktime_get();
             elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_info("copy_from_user mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+            log_benchmark("copy_from_user mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
 #endif
             if(ret) {
                 log_error("unable to copy mmap struct from user during mmap ioctl: %lu", ret);
@@ -97,7 +97,7 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
 #ifdef BENCHMARK
             end = ktime_get();
             elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_info("filp_open elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+            log_benchmark("filp_open elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
 #endif
             if(IS_ERR(file_ptr)) {
                 log_error("unable to open file '%s' during mmap ioctl: %ld", path, PTR_ERR(file_ptr));
@@ -113,7 +113,7 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
 #ifdef BENCHMARK
             end = ktime_get();
             elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_info("kvzalloc mmap elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+            log_benchmark("kvzalloc mmap elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
 #endif
             if(!elements) {
                 log_crit("unable to allocate elements variable during mmap ioctl");
@@ -129,7 +129,7 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
 #ifdef BENCHMARK
             end = ktime_get();
             elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_info("copy_from_user mmap elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+            log_benchmark("copy_from_user mmap elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
 #endif
             if(ret) {
                 log_error("unable to copy elements from user during mmap ioctl: %lu", ret);
@@ -149,7 +149,7 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
 #ifdef BENCHMARK
             end = ktime_get();
             elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_info("vm_mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+            log_benchmark("vm_mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
 #endif
             int close_ret = filp_close(file_ptr, NULL);
             if(close_ret) {
@@ -168,7 +168,7 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
 #ifdef BENCHMARK
             end = ktime_get();
             elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_info("copy_to_user elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+            log_benchmark("copy_to_user elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
 #endif
             if(ret) {
                 log_error("unable to copy elements to user during mmap ioctl: %lu", ret);

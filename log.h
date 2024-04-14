@@ -18,11 +18,10 @@
 #ifndef BATCH_SYSCALLS_LOG_H
 #define BATCH_SYSCALLS_LOG_H
 
-#define _log_prepend_info "[batch_mmap (INFO)]:"
-#define _log_prepend_warn "[batch_mmap (WARN)]:"
-#define _log_prepend_error "[batch_mmap (ERROR)]:"
-#define _log_prepend_debug "[batch_mmap (DEBUG)]:"
-#define _log_prepend_crit "[batch_mmap (CRIT)]:"
+#define _log_prepend_info "[batch_syscalls (INFO)]:"
+#define _log_prepend_warn "[batch_syscalls (WARN)]:"
+#define _log_prepend_error "[batch_syscalls (ERROR)]:"
+#define _log_prepend_crit "[batch_syscalls (CRIT)]:"
 
 #define log_info(fmt, ...) printk(KERN_INFO _log_prepend_info " " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
 #define log_warn(fmt, ...) printk(KERN_WARNING _log_prepend_warn " " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
@@ -30,9 +29,17 @@
 #define log_crit(fmt, ...) printk(KERN_CRIT _log_prepend_crit " " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
 
 #ifdef DEBUG
+#define _log_prepend_debug "[batch_syscalls (DEBUG)]:"
 #define log_debug(fmt, ...) printk(KERN_DEBUG _log_prepend_debug " " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
 #else
 #define log_debug(fmt, ...)
+#endif
+
+#ifdef BENCHMARK
+#define _log_prepend_benchmark "[batch_syscalls (BENCHMARK)]:"
+#define log_benchmark(fmt, ...) printk(KERN_DEBUG _log_prepend_benchmark " " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
+#else
+#define log_benchmark(fmt, ...)
 #endif
 
 #endif //BATCH_SYSCALLS_LOG_H
