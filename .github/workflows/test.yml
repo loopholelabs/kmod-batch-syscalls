@@ -28,6 +28,10 @@ jobs:
         run: make test-generate
         shell: bash
 
+      - name: Set 'vm.max_map_count' parameter
+        run: sudo sysctl -w vm.max_map_count=262144
+        shell: bash
+
       - name: Run Kernel ModuleTest
         run: make test
         shell: bash
