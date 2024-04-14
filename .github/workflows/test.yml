@@ -32,7 +32,7 @@ jobs:
         run: sudo sysctl -w vm.max_map_count=262144
         shell: bash
 
-      - name: Run Kernel ModuleTest
+      - name: Run Kernel Module Test
         run: make test
         shell: bash
 
