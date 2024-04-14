@@ -24,8 +24,8 @@
 #include <unistd.h>
 
 int main() {
-    const size_t page_size = getpagesize();
-    const size_t total_size = page_size * 1024 * 1024 * 4;
+    const size_t page_size = getpagesize() * 64;
+    const size_t total_size = page_size * 1024 * 4;
     printf("Using pagesize %lu with total size %lu\n", page_size, total_size);
 
     int baseFd = open("base.bin", O_RDONLY);
@@ -76,7 +76,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    int pages_added = 0;
+    int i = 0;
     for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
         char *overlayMap = mmap(baseMap + offset, page_size, PROT_READ, MAP_PRIVATE | MAP_FIXED, overlayFd, offset);
         if (overlayMap == MAP_FAILED) {
@@ -86,7 +86,7 @@ int main() {
             close(overlayFd);
             return EXIT_FAILURE;
         }
-        pages_added++;
+        i++;
     }
 
     if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
@@ -98,7 +98,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    printf("mmap(\"overlay.bin\") (%i pages) took %lins (%lims)\n", pages_added, after.tv_nsec - before.tv_nsec, (after.tv_nsec - before.tv_nsec)/1000000);
+    printf("mmap(\"overlay.bin\") (%i pages) took %lins (%lims)\n", i, after.tv_nsec - before.tv_nsec, (after.tv_nsec - before.tv_nsec)/1000000);
 
     return EXIT_SUCCESS;
 }

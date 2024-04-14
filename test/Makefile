@@ -1,13 +1,13 @@
 all: test
 
 .PHONY: test
-test: generate
+test:
 	gcc test.c -I../ -o test
 	sudo ./test
 	${MAKE} clean
 
-.PHONY: test-normal
-test-normal: generate
+.PHONY: normal
+normal:
 	gcc normal.c -I../ -o normal
 	sudo ./normal
 	${MAKE} clean

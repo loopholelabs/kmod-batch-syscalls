@@ -33,4 +33,12 @@ test:
 
 .PHONY: test-normal
 test-normal:
-	cd test && ((${MAKE} test-normal && exit 0) || exit -1)
+	cd test && ((${MAKE} normal && exit 0) || exit -1)
+
+.PHONY: test-generate
+test-generate:
+	cd test && ((${MAKE} generate && exit 0) || exit -1)
+
+.PHONY: test-clean
+test-clean:
+	cd test && ((${MAKE} clean && exit 0) || exit -1)
