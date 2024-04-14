@@ -57,7 +57,7 @@ jobs:
         shell: bash
 
       - name: Print last 30 dmesg logs
-        run: sudo dmesg | tail -n 30 | grep BENCHMARK
+        run: sudo dmesg | tail -n 30 | grep batch_syscalls
         shell: bash
 
       - name: Unload Module
