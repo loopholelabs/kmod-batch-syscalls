@@ -44,6 +44,26 @@ jobs:
         run: sudo make unload
         shell: bash
 
+      - name: Build Module with Benchmarking
+        run: BENCHMARK=true make module
+        shell: bash
+
+      - name: Load Module
+        run: sudo make load
+        shell: bash
+
+      - name: Run Kernel Module Test
+        run: make test
+        shell: bash
+
+      - name: Print last 30 dmesg logs
+        run: sudo dmesg | tail -n 30
+        shell: bash
+
+      - name: Unload Module
+        run: sudo make unload
+        shell: bash
+
       - name: Cleanup Module
         run: make clean
         shell: bash

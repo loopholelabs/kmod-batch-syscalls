@@ -6,6 +6,10 @@ ifdef DEBUG
     CFLAGS_log.o := -DDEBUG
 endif
 
+ifdef BENCHMARK
+	CFLAGS_module.o := -DBENCHMARK
+endif
+
 clean-files := *.o *.mod.c *.mod.o *.ko *.symvers *.o.d
 
 all: module

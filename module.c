@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/device.h>
+#include <linux/time.h>
 
 #include <asm/io.h>
 
@@ -50,8 +51,20 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
     log_debug("called unlocked_ioctl");
     switch(cmd){
         case IOCTL_MMAP_CMD:
+#ifdef BENCHMARK
+            ktime_t start, end;
+            s64 elapsed;
+#endif
             struct mmap mmap;
+#ifdef BENCHMARK
+            start = ktime_get();
+#endif
             unsigned long ret = copy_from_user(&mmap, (struct mmap*)arg, sizeof(struct mmap));
+#ifdef BENCHMARK
+            end = ktime_get();
+            elapsed = ktime_to_ns(ktime_sub(end, start));
+            log_info("copy_from_user mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+#endif
             if(ret) {
                 log_error("unable to copy mmap struct from user during mmap ioctl: %lu", ret);
                 break;
@@ -77,7 +90,15 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
             }
             path[path_len-1] = '\0';
             log_debug("opening file '%s' with mode %u (%u) during mmap ioctl", path, mmap.mode, mmap.mode | O_LARGEFILE);
+#ifdef BENCHMARK
+            start = ktime_get();
+#endif
             struct file* file_ptr = filp_open(path, mmap.mode | O_LARGEFILE, 0);
+#ifdef BENCHMARK
+            end = ktime_get();
+            elapsed = ktime_to_ns(ktime_sub(end, start));
+            log_info("filp_open elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+#endif
             if(IS_ERR(file_ptr)) {
                 log_error("unable to open file '%s' during mmap ioctl: %ld", path, PTR_ERR(file_ptr));
                 kfree(path);
@@ -85,7 +106,15 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
             }
             log_info("performing %d mmap operations for '%s' with flag %lu and prot %lu during mmap ioctl", mmap.size, path, mmap.flag, mmap.prot);
             log_debug("allocating %lu bytes for mmap elements", sizeof(struct mmap_element) * mmap.size);
+#ifdef BENCHMARK
+            start = ktime_get();
+#endif
             struct mmap_element* elements = kvzalloc(sizeof(struct mmap_element) * mmap.size, GFP_KERNEL);
+#ifdef BENCHMARK
+            end = ktime_get();
+            elapsed = ktime_to_ns(ktime_sub(end, start));
+            log_info("kvzalloc mmap elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+#endif
             if(!elements) {
                 log_crit("unable to allocate elements variable during mmap ioctl");
                 fput(file_ptr);
@@ -93,7 +122,15 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
                 return -ENOMEM;
             }
             log_debug("copying %lu bytes from user for mmap ioctl with path '%s'", sizeof(struct mmap_element) * mmap.size, path);
+#ifdef BENCHMARK
+            start = ktime_get();
+#endif
             ret = copy_from_user(elements, mmap.elements, sizeof(struct mmap_element) * mmap.size);
+#ifdef BENCHMARK
+            end = ktime_get();
+            elapsed = ktime_to_ns(ktime_sub(end, start));
+            log_info("copy_from_user mmap elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+#endif
             if(ret) {
                 log_error("unable to copy elements from user during mmap ioctl: %lu", ret);
                 kvfree(elements);
@@ -101,12 +138,19 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
                 kfree(path);
                 break;
             }
+#ifdef BENCHMARK
+            start = ktime_get();
+#endif
             for(unsigned int i = 0; i < mmap.size; i++) {
                 log_debug("batch mmap ioctl with path '%s' for element %u: addr %lu, len %lu, prot %lu, flag %lu, and offset %lu", path, i, elements[i].addr, elements[i].len, mmap.prot, mmap.flag, elements[i].offset);
                 elements[i].ret = vm_mmap(file_ptr, elements[i].addr, elements[i].len, mmap.prot, mmap.flag, elements[i].offset);
                 log_debug("successful mmap ioctl for element %u with path '%s' (addr %lu, len %lu, and offset %lu)", i, path, elements[i].addr, elements[i].len, elements[i].offset);
             }
-
+#ifdef BENCHMARK
+            end = ktime_get();
+            elapsed = ktime_to_ns(ktime_sub(end, start));
+            log_info("vm_mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+#endif
             int close_ret = filp_close(file_ptr, NULL);
             if(close_ret) {
                 log_error("unable to close file '%s' during mmap ioctl", path);
@@ -117,14 +161,19 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
             }
             fput(file_ptr);
             kfree(path);
-
-            for(unsigned int i = 0; i < mmap.size; i++) {
-                ret = copy_to_user(&mmap.elements[i], &elements[i], sizeof(struct mmap_element));
-                if(ret) {
-                    log_error("unable to copy element %u to user during mmap ioctl: %lu", i, ret);
-                    kvfree(elements);
-                    break;
-                }
+#ifdef BENCHMARK
+            start = ktime_get();
+#endif
+            ret = copy_to_user(mmap.elements, elements, sizeof(struct mmap_element) * mmap.size);
+#ifdef BENCHMARK
+            end = ktime_get();
+            elapsed = ktime_to_ns(ktime_sub(end, start));
+            log_info("copy_to_user elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
+#endif
+            if(ret) {
+                log_error("unable to copy elements to user during mmap ioctl: %lu", ret);
+                kvfree(elements);
+                break;
             }
             kvfree(elements);
 
