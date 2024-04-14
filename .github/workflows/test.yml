@@ -20,10 +20,6 @@ jobs:
         run: make module
         shell: bash
 
-      - name: Load Module
-        run: sudo make load
-        shell: bash
-
       - name: Generate Test Data
         run: make test-generate
         shell: bash
@@ -32,12 +28,36 @@ jobs:
         run: sudo sysctl -w vm.max_map_count=262144
         shell: bash
 
+      - name: Load Module
+        run: sudo make load
+        shell: bash
+
       - name: Run Kernel Module Test
         run: make test
         shell: bash
 
+      - name: Unload Module
+        run: sudo make unload
+        shell: bash
+
       - name: Run Userspace Test
         run: make test-userspace
+        shell: bash
+
+      - name: Build Module with Benchmarking
+        run: BENCHMARK=true make module
+        shell: bash
+
+      - name: Load Module
+        run: sudo make load
+        shell: bash
+
+      - name: Run Kernel Module Test (With Benchmarking)
+        run: make test
+        shell: bash
+
+      - name: Print last 30 dmesg logs
+        run: sudo dmesg | tail -n 30 | grep batch_syscalls
         shell: bash
 
       - name: Unload Module
