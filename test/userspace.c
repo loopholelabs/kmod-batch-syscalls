@@ -15,17 +15,22 @@
     along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <bits/time.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/mman.h>
 #include <time.h>
+#include <string.h>
 #include <unistd.h>
+
+#include <bits/time.h>
+
+
+#include <sys/mman.h>
+
 
 int main() {
     const size_t page_size = getpagesize() * 64;
-    const size_t total_size = page_size * 1024 * 4;
+    const size_t total_size = page_size * 1024 * 8;
     printf("Using pagesize %lu with total size %lu\n", page_size, total_size);
 
     int baseFd = open("base.bin", O_RDONLY);
@@ -100,5 +105,50 @@ int main() {
 
     printf("mmap(\"overlay.bin\") (%i pages) took %lins (%lims)\n", i, after.tv_nsec - before.tv_nsec, (after.tv_nsec - before.tv_nsec)/1000000);
 
+    printf("checking mmap buffer against file contents\n");
+
+    char *buffer = malloc(page_size);
+    memset(buffer, 0, page_size);
+
+    for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
+        lseek(overlayFd, offset, SEEK_SET);
+        read(overlayFd, buffer, page_size);
+        if (memcmp(baseMap + offset, buffer, page_size)) {
+            printf("ERROR: mmap buffer does not match the file contents at offset %lu\n", offset);
+            free(buffer);
+            close(overlayFd);
+            close(baseFd);
+            return EXIT_FAILURE;
+        }
+        memset(buffer, 0, page_size);
+    }
+
+    for (size_t offset = page_size; offset < total_size; offset += page_size * 2) {
+        lseek(baseFd, offset, SEEK_SET);
+        read(baseFd, buffer, page_size);
+        if (memcmp(baseMap + offset, buffer, page_size)) {
+            printf("ERROR: mmap buffer does not match the file contents at offset %lu\n", offset);
+            free(buffer);
+            close(overlayFd);
+            close(baseFd);
+            return EXIT_FAILURE;
+        }
+        memset(buffer, 0, page_size);
+    }
+
+    printf("successfully checked mmap buffer against file contents\n");
+
+    int ret = munmap(baseMap, total_size);
+    if(ret) {
+        printf("error during munmap: %d\n", ret);
+        free(buffer);
+        close(overlayFd);
+        close(baseFd);
+        return EXIT_FAILURE;
+    }
+
+    free(buffer);
+    close(overlayFd);
+    close(baseFd);
     return EXIT_SUCCESS;
 }

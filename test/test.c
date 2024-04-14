@@ -32,7 +32,7 @@
 
 int main() {
     const size_t page_size = getpagesize() * 64;
-    const size_t total_size = page_size * 1024 * 4;
+    const size_t total_size = page_size * 1024 * 8;
     printf("Using pagesize %lu with total size %lu\n", page_size, total_size);
 
     int baseFd = open("base.bin", O_RDONLY);

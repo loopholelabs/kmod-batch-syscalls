@@ -15,7 +15,7 @@ module:
 	${MAKE} -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
 .PHONY: clean
-clean:
+clean: test-clean
 	${MAKE} -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
 	$(RM) $(clean-files)
 
@@ -31,9 +31,9 @@ unload:
 test:
 	cd test && ((${MAKE} test && exit 0) || exit -1)
 
-.PHONY: test-normal
-test-normal:
-	cd test && ((${MAKE} normal && exit 0) || exit -1)
+.PHONY: test-userspace
+test-userspace:
+	cd test && ((${MAKE} userspace && exit 0) || exit -1)
 
 .PHONY: test-generate
 test-generate:

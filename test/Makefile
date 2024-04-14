@@ -4,13 +4,11 @@ all: test
 test:
 	gcc test.c -I../ -o test
 	sudo ./test
-	${MAKE} clean
 
-.PHONY: normal
-normal:
-	gcc normal.c -I../ -o normal
-	sudo ./normal
-	${MAKE} clean
+.PHONY: userspace
+userspace:
+	gcc userspace.c -I../ -o userspace
+	sudo ./userspace
 
 .PHONY: generate
 generate:
@@ -18,4 +16,4 @@ generate:
 
 .PHONY: clean
 clean:
-	rm -rf test normal *.bin
+	rm -rf test userspace *.bin
