@@ -36,12 +36,12 @@ jobs:
         run: make test
         shell: bash
 
-      - name: Run Userspace Test
-        run: make test-userspace
-        shell: bash
-
       - name: Unload Module
         run: sudo make unload
+        shell: bash
+
+      - name: Run Userspace Test
+        run: make test-userspace
         shell: bash
 
       - name: Build Module with Benchmarking
@@ -52,7 +52,7 @@ jobs:
         run: sudo make load
         shell: bash
 
-      - name: Run Kernel Module Test
+      - name: Run Kernel Module Test (With Benchmarking)
         run: make test
         shell: bash
 
