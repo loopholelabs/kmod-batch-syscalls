@@ -24,13 +24,11 @@
 
 #include <bits/time.h>
 
-
 #include <sys/mman.h>
 
-
 int main() {
-    const size_t page_size = getpagesize() * 64;
-    const size_t total_size = page_size * 1024 * 8;
+    const size_t page_size = getpagesize();
+    const size_t total_size = page_size * 1024 * 1024;
     printf("Using pagesize %lu with total size %lu\n", page_size, total_size);
 
     int baseFd = open("base.bin", O_RDONLY);
@@ -46,16 +44,9 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    struct timespec before, after;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &before) < 0) {
-        printf("ERROR: could not measure 'before' time for base mmap\n");
-        close(overlayFd);
-        close(baseFd);
-        return EXIT_FAILURE;
-    }
-
+    clock_t time = clock();
     char *baseMap = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, baseFd, 0);
+    time = clock() - time;
     if (baseMap == MAP_FAILED) {
         printf("ERROR: could not mmap base file\n");
         close(overlayFd);
@@ -63,23 +54,9 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
-        printf("ERROR: could not measure 'after' time for base mmap\n");
-        munmap(baseMap, total_size);
-        close(overlayFd);
-        close(baseFd);
-        return EXIT_FAILURE;
-    }
+    printf("mmap(\"base.bin\") took %fms\n", (double)time/CLOCKS_PER_SEC*1000);
 
-    printf("mmap(\"base.bin\") took %lins (%lims)\n", after.tv_nsec - before.tv_nsec, (after.tv_nsec - before.tv_nsec)/1000000);
-
-    if (clock_gettime(CLOCK_MONOTONIC, &before) < 0) {
-        printf("ERROR: could not measure 'before' time for overlay mmap\n");
-        munmap(baseMap, total_size);
-        close(overlayFd);
-        close(baseFd);
-        return EXIT_FAILURE;
-    }
+    time = clock();
 
     int i = 0;
     for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
@@ -94,16 +71,9 @@ int main() {
         i++;
     }
 
-    if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
-        printf("ERROR: could not measure 'after' time for overlay mmap\n");
-        munmap(baseMap, total_size);
-        close(baseFd);
-        close(overlayFd);
+   time = clock() - time;
 
-        return EXIT_FAILURE;
-    }
-
-    printf("mmap(\"overlay.bin\") (%i pages) took %lins (%lims)\n", i, after.tv_nsec - before.tv_nsec, (after.tv_nsec - before.tv_nsec)/1000000);
+    printf("mmap(\"overlay.bin\") took %fms\n", (double)time/CLOCKS_PER_SEC*1000);
 
     printf("checking mmap buffer against file contents\n");
 

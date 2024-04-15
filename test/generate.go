@@ -24,8 +24,8 @@ import (
 )
 
 func main() {
-	pageSize := os.Getpagesize() * 64
-	totalSize := pageSize * 1024 * 8
+	pageSize := os.Getpagesize()
+	totalSize := pageSize * 1024 * 1024
 
 	fmt.Printf("using pageSize %d with totalSize %d\n", pageSize, totalSize)
 
