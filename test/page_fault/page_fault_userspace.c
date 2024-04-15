@@ -26,16 +26,6 @@
 
 #include <sys/mman.h>
 
-void time_diff(struct timespec* before, struct timespec* after, struct timespec* diff) {
-    if ((before->tv_nsec - after->tv_nsec) < 0) {
-        diff->tv_sec = before->tv_sec - after->tv_sec - 1;
-        diff->tv_nsec = 1000000000 + before->tv_nsec - after->tv_nsec;
-    } else {
-        diff->tv_sec = before->tv_sec - after->tv_sec;
-        diff->tv_nsec = before->tv_nsec - after->tv_nsec;
-    }
-}
-
 int main() {
     const size_t page_size = getpagesize();
     const size_t total_size = page_size * 1024 * 1024;
@@ -55,19 +45,9 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    struct timespec before, after, diff;
-    memset(&before, 0, sizeof(struct timespec));
-    memset(&after, 0, sizeof(struct timespec));
-    memset(&diff, 0, sizeof(struct timespec));
-
-    if (clock_gettime(CLOCK_REALTIME, &before) < 0) {
-        printf("ERROR: could not measure 'before' time for base mmap\n");
-        close(overlay1Fd);
-        close(baseFd);
-        return EXIT_FAILURE;
-    }
-
+    clock_t time = clock();
     char *baseMap = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, baseFd, 0);
+    time = clock() - time;
     if (baseMap == MAP_FAILED) {
         printf("ERROR: could not mmap base file\n");
         close(overlay1Fd);
@@ -75,27 +55,9 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    if (clock_gettime(CLOCK_REALTIME, &after) < 0) {
-        printf("ERROR: could not measure 'after' time for base mmap\n");
-        munmap(baseMap, total_size);
-        close(overlay1Fd);
-        close(baseFd);
-        return EXIT_FAILURE;
-    }
+    printf("mmap(\"base.bin\") took %fms\n", (double)time/CLOCKS_PER_SEC*1000);
 
-    time_diff(&before, &after, &diff);
-    printf("mmap(\"base.bin\") took %lins (%lims)\n", diff.tv_nsec, (diff.tv_nsec)/1000000);
-    memset(&before, 0, sizeof(struct timespec));
-    memset(&after, 0, sizeof(struct timespec));
-    memset(&diff, 0, sizeof(struct timespec));
-
-    if (clock_gettime(CLOCK_REALTIME, &before) < 0) {
-        printf("ERROR: could not measure 'before' time for overlay1 mmap\n");
-        munmap(baseMap, total_size);
-        close(overlay1Fd);
-        close(baseFd);
-        return EXIT_FAILURE;
-    }
+    time = clock();
 
     int i = 0;
     for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
@@ -110,31 +72,13 @@ int main() {
         i++;
     }
 
-    if (clock_gettime(CLOCK_REALTIME, &after) < 0) {
-        printf("ERROR: could not measure 'after' time for overlay1 mmap\n");
-        munmap(baseMap, total_size);
-        close(baseFd);
-        close(overlay1Fd);
-
-        return EXIT_FAILURE;
-    }
-
-    time_diff(&before, &after, &diff);
-    printf("mmap(\"overlay1.bin\") took %lins (%lims)\n", diff.tv_nsec, (diff.tv_nsec)/1000000);
-    memset(&before, 0, sizeof(struct timespec));
-    memset(&after, 0, sizeof(struct timespec));
-    memset(&diff, 0, sizeof(struct timespec));
+    time = clock() - time;
+    printf("mmap(\"overlay1.bin\") took %fms\n", (double)time/CLOCKS_PER_SEC*1000);
 
     char *buffer = malloc(page_size);
     memset(buffer, 0, page_size);
 
-    if (clock_gettime(CLOCK_REALTIME, &before) < 0) {
-        printf("ERROR: could not measure 'before' time for page faults\n");
-        free(buffer);
-        close(overlay1Fd);
-        close(baseFd);
-        return EXIT_FAILURE;
-    }
+    time = clock();
 
     for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
 #ifdef VERIFY
@@ -170,17 +114,8 @@ int main() {
 #endif
     }
 
-    if (clock_gettime(CLOCK_REALTIME, &after) < 0) {
-        printf("ERROR: could not measure 'after' time for page faults\n");
-        free(buffer);
-        munmap(baseMap, total_size);
-        close(baseFd);
-        close(overlay1Fd);
-        return EXIT_FAILURE;
-    }
-
-    time_diff(&before, &after, &diff);
-    printf("page faults for %d pages took %lins (%lims)\n", i, diff.tv_nsec, (diff.tv_nsec)/1000000);
+    time = clock() - time;
+    printf("page faults for %d pages took %fms\n", i, (double)time/CLOCKS_PER_SEC*1000);
 
 #ifdef VERIFY
     printf("successfully verified mmap\n");
