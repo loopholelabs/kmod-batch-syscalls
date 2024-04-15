@@ -45,28 +45,52 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    clock_t time = clock();
-    char *baseMap = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, baseFd, 0);
-    time = clock() - time;
-    if (baseMap == MAP_FAILED) {
-        printf("ERROR: could not mmap base file\n");
+    int overlay2Fd = open("overlay2.bin", O_RDONLY);
+    if (overlay2Fd < 0) {
+        printf("ERROR: could not open overlay2 file: %d\n", overlay2Fd);
         close(overlay1Fd);
         close(baseFd);
         return EXIT_FAILURE;
     }
 
-    printf("mmap(\"base.bin\") took %fms\n", (double)time/CLOCKS_PER_SEC*1000);
+    clock_t time = clock();
+    char *baseMap1 = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, baseFd, 0);
+    time = clock() - time;
+    if (baseMap1 == MAP_FAILED) {
+        printf("ERROR: could not mmap base file (baseMap1)\n");
+        close(overlay2Fd);
+        close(overlay1Fd);
+        close(baseFd);
+        return EXIT_FAILURE;
+    }
+
+    printf("mmap(\"base.bin\") for baseMap1 took %fms\n", (double)time/CLOCKS_PER_SEC*1000);
 
     time = clock();
+    char *baseMap2 = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, baseFd, 0);
+    time = clock() - time;
+    if (baseMap2 == MAP_FAILED) {
+        printf("ERROR: could not mmap base file (baseMap2)\n");
+        munmap(baseMap1, total_size);
+        close(overlay2Fd);
+        close(overlay1Fd);
+        close(baseFd);
+        return EXIT_FAILURE;
+    }
+
+    printf("mmap(\"base.bin\") for baseMap2 took %fms\n", (double)time/CLOCKS_PER_SEC*1000);
 
     int i = 0;
+    time = clock();
     for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
-        char *overlayMap = mmap(baseMap + offset, page_size, PROT_READ, MAP_PRIVATE | MAP_FIXED, overlay1Fd, offset);
+        char *overlayMap = mmap(baseMap1 + offset, page_size, PROT_READ, MAP_PRIVATE | MAP_FIXED, overlay1Fd, offset);
         if (overlayMap == MAP_FAILED) {
             printf("ERROR: could not mmap overlay1 file for index %d\n", i);
-            munmap(baseMap, total_size);
-            close(baseFd);
+            munmap(baseMap2, total_size);
+            munmap(baseMap1, total_size);
+            close(overlay2Fd);
             close(overlay1Fd);
+            close(baseFd);
             return EXIT_FAILURE;
         }
         i++;
@@ -79,21 +103,23 @@ int main() {
     memset(buffer, 0, page_size);
 
     time = clock();
-
     for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
 #ifdef VERIFY
         lseek(overlay1Fd, offset, SEEK_SET);
         read(overlay1Fd, buffer, page_size);
-        if (memcmp(baseMap + offset, buffer, page_size)) {
-            printf("ERROR: mmap buffer does not match the overlay file contents at offset %lu\n", offset);
+        if (memcmp(baseMap1 + offset, buffer, page_size)) {
+            printf("ERROR: mmap buffer does not match the overlay1 file contents at offset %lu\n", offset);
             free(buffer);
+            munmap(baseMap2, total_size);
+            munmap(baseMap1, total_size);
+            close(overlay2Fd);
             close(overlay1Fd);
             close(baseFd);
             return EXIT_FAILURE;
         }
         memset(buffer, 0, page_size);
 #else
-        memcpy(buffer, baseMap + offset, page_size);
+        memcpy(buffer, baseMap1 + offset, page_size);
 #endif
     }
 
@@ -101,36 +127,52 @@ int main() {
 #ifdef VERIFY
         lseek(baseFd, offset, SEEK_SET);
         read(baseFd, buffer, page_size);
-        if (memcmp(baseMap + offset, buffer, page_size)) {
-            printf("ERROR: mmap buffer does not match the base file contents at offset %lu\n", offset);
+        if (memcmp(baseMap1 + offset, buffer, page_size)) {
+            printf("ERROR: mmap buffer does not match the base file contents at offset %lu (baseMap1)\n", offset);
             free(buffer);
+            munmap(baseMap2, total_size);
+            munmap(baseMap1, total_size);
+            close(overlay2Fd);
             close(overlay1Fd);
             close(baseFd);
             return EXIT_FAILURE;
         }
         memset(buffer, 0, page_size);
 #else
-        memcpy(buffer, baseMap + offset, page_size);
+        memcpy(buffer, baseMap1 + offset, page_size);
 #endif
     }
 
     time = clock() - time;
-    printf("page faults for %d pages took %fms\n", i, (double)time/CLOCKS_PER_SEC*1000);
+    printf("page faults for %d pages took %fms (baseMap1)\n", i, (double)time/CLOCKS_PER_SEC*1000);
 
 #ifdef VERIFY
-    printf("successfully verified mmap\n");
+    printf("successfully verified mmap (baseMap1)\n");
 #endif
 
-    int ret = munmap(baseMap, total_size);
+    int ret = munmap(baseMap2, total_size);
     if(ret) {
-        printf("error during munmap: %d\n", ret);
+        printf("error during munmap: %d (baseMap2)\n", ret);
         free(buffer);
+        munmap(baseMap1, total_size);
+        close(overlay2Fd);
+        close(overlay1Fd);
+        close(baseFd);
+        return EXIT_FAILURE;
+    }
+
+    ret = munmap(baseMap1, total_size);
+    if(ret) {
+        printf("error during munmap: %d (baseMap1)\n", ret);
+        free(buffer);
+        close(overlay2Fd);
         close(overlay1Fd);
         close(baseFd);
         return EXIT_FAILURE;
     }
 
     free(buffer);
+    close(overlay2Fd);
     close(overlay1Fd);
     close(baseFd);
     return EXIT_SUCCESS;

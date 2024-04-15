@@ -20,7 +20,7 @@ module:
 	${MAKE} -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
 .PHONY: clean
-clean: test-clean
+clean: tests-clean
 	${MAKE} -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
 	$(RM) $(clean-files)
 
@@ -32,18 +32,18 @@ load:
 unload:
 	rmmod batch_syscalls
 
-.PHONY: test
-test:
-	cd test && ((${MAKE} all && exit 0) || exit -1)
+.PHONY: tests
+tests:
+	cd tests && ((${MAKE} all && exit 0) || exit -1)
 
-.PHONY: test-userspace
-test-userspace:
-	cd test && ((${MAKE} userspace && exit 0) || exit -1)
+.PHONY: tests-userspace
+tests-userspace:
+	cd tests && ((${MAKE} userspace && exit 0) || exit -1)
 
-.PHONY: test-generate
-test-generate:
-	cd test && ((${MAKE} generate && exit 0) || exit -1)
+.PHONY: tests-generate
+tests-generate:
+	cd tests && ((${MAKE} generate && exit 0) || exit -1)
 
-.PHONY: test-clean
-test-clean:
-	cd test && ((${MAKE} clean && exit 0) || exit -1)
+.PHONY: tests-clean
+tests-clean:
+	cd tests && ((${MAKE} clean && exit 0) || exit -1)
