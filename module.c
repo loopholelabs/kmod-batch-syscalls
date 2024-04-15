@@ -35,6 +35,21 @@ MODULE_AUTHOR("Loophole Labs (Shivansh Vij)");
 MODULE_DESCRIPTION("Batch Syscalls");
 MODULE_LICENSE("GPL");
 
+static struct vm_operations_struct hijacked_vm_ops;
+static struct file* overlay_file_ptr;
+static vm_fault_t (*original_page_fault)(struct vm_fault *vmf);
+static vm_fault_t (*original_map_pages)(struct vm_fault *vmf, pgoff_t start_pgoff, pgoff_t end_pgoff);
+
+static vm_fault_t hijacked_page_fault(struct vm_fault *vmf) {
+    log_info("got hijacked page fault");
+    return original_page_fault(vmf);
+}
+
+static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff, pgoff_t end_pgoff) {
+    log_info("got hijacked map pages: (%lu - %lu)", start_pgoff, end_pgoff);
+    return original_map_pages(vmf, start_pgoff, end_pgoff);
+}
+
 static int device_open(struct inode *device_file, struct file *instance) {
     log_debug("called device_open");
     log_info("device opened");
@@ -93,18 +108,18 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
 #ifdef BENCHMARK
             start = ktime_get();
 #endif
-            struct file* file_ptr = filp_open(path, mmap.mode | O_LARGEFILE, 0);
+            overlay_file_ptr = filp_open(path, mmap.mode | O_LARGEFILE, 0);
 #ifdef BENCHMARK
             end = ktime_get();
             elapsed = ktime_to_ns(ktime_sub(end, start));
             log_benchmark("filp_open elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
 #endif
-            if(IS_ERR(file_ptr)) {
-                log_error("unable to open file '%s' during mmap ioctl: %ld", path, PTR_ERR(file_ptr));
+            if(IS_ERR(overlay_file_ptr)) {
+                log_error("unable to open file '%s' during mmap ioctl: %ld", path, PTR_ERR(overlay_file_ptr));
                 kfree(path);
                 break;
             }
-            log_info("performing %d mmap operations for '%s' with flag %lu and prot %lu during mmap ioctl", mmap.size, path, mmap.flag, mmap.prot);
+            log_info("performing %u mmap operations for '%s' during mmap ioctl", mmap.size, path);
             log_debug("allocating %lu bytes for mmap elements", sizeof(struct mmap_element) * mmap.size);
 #ifdef BENCHMARK
             start = ktime_get();
@@ -117,7 +132,7 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
 #endif
             if(!elements) {
                 log_crit("unable to allocate elements variable during mmap ioctl");
-                fput(file_ptr);
+                fput(overlay_file_ptr);
                 kfree(path);
                 return -ENOMEM;
             }
@@ -134,32 +149,51 @@ static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long ar
             if(ret) {
                 log_error("unable to copy elements from user during mmap ioctl: %lu", ret);
                 kvfree(elements);
-                fput(file_ptr);
+                fput(overlay_file_ptr);
                 kfree(path);
                 break;
             }
 #ifdef BENCHMARK
             start = ktime_get();
 #endif
-            for(unsigned int i = 0; i < mmap.size; i++) {
-                log_debug("batch mmap ioctl with path '%s' for element %u: addr %lu, len %lu, prot %lu, flag %lu, and offset %lu", path, i, elements[i].addr, elements[i].len, mmap.prot, mmap.flag, elements[i].offset);
-                elements[i].ret = vm_mmap(file_ptr, elements[i].addr, elements[i].len, mmap.prot, mmap.flag, elements[i].offset);
-                log_debug("successful mmap ioctl for element %u with path '%s' (addr %lu, len %lu, and offset %lu)", i, path, elements[i].addr, elements[i].len, elements[i].offset);
+            struct vm_area_struct* base_vma = find_vma(current->mm, mmap.base_addr);
+            if (base_vma == NULL || base_vma->vm_start > mmap.base_addr) {
+                log_error("invalid base_vma");
+                kvfree(elements);
+                fput(overlay_file_ptr);
+                kfree(path);
+                return -EFAULT;
             }
+
+            if(!hijacked_vm_ops.fault) {
+                log_info("hijacking vm_ops no fault for base_addr %lu", mmap.base_addr);
+                original_page_fault = base_vma->vm_ops->fault;
+                original_map_pages = base_vma->vm_ops->map_pages;
+                memcpy(&hijacked_vm_ops, base_vma->vm_ops, sizeof(struct vm_operations_struct));
+                hijacked_vm_ops.fault = &hijacked_page_fault;
+//                hijacked_vm_ops.huge_fault = NULL;
+//                hijacked_vm_ops.close = NULL;
+//                hijacked_vm_ops.open = NULL;
+//                hijacked_vm_ops.access = NULL;
+//                hijacked_vm_ops.find_special_page = NULL;
+//                hijacked_vm_ops.get_policy = NULL;
+//                hijacked_vm_ops.get_policy = NULL;
+//                hijacked_vm_ops.may_split = NULL;
+//                hijacked_vm_ops.mremap = NULL;
+//                hijacked_vm_ops.mprotect = NULL;
+                hijacked_vm_ops.map_pages = &hijacked_map_pages;
+//                hijacked_vm_ops.pagesize = NULL;
+//                hijacked_vm_ops.page_mkwrite = NULL;
+//                hijacked_vm_ops.pfn_mkwrite = NULL;
+//                hijacked_vm_ops.name = NULL;
+            }
+            base_vma->vm_ops = &hijacked_vm_ops;
+            log_info("done hijacking vm_ops");
 #ifdef BENCHMARK
             end = ktime_get();
             elapsed = ktime_to_ns(ktime_sub(end, start));
             log_benchmark("vm_mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
 #endif
-            int close_ret = filp_close(file_ptr, NULL);
-            if(close_ret) {
-                log_error("unable to close file '%s' during mmap ioctl", path);
-                kvfree(elements);
-                fput(file_ptr);
-                kfree(path);
-                break;
-            }
-            fput(file_ptr);
             kfree(path);
 #ifdef BENCHMARK
             start = ktime_get();
@@ -233,6 +267,15 @@ static int __init init_mod(void) {
 }
 static void __exit exit_mod(void) {
     log_debug("called exit_module");
+
+    if(overlay_file_ptr) {
+        int close_ret = filp_close(overlay_file_ptr, NULL);
+        if(close_ret) {
+            log_error("unable to close overlay_file_ptr during mmap ioctl");
+        }
+        fput(overlay_file_ptr);
+    }
+
     log_info("unregistering device with major %u and ID '%s'", (unsigned int)major, DEVICE_ID);
     device_destroy(device_class, device_number);
     class_destroy(device_class);

@@ -34,7 +34,7 @@ unload:
 
 .PHONY: test
 test:
-	cd test && ((${MAKE} test && exit 0) || exit -1)
+	cd test && ((${MAKE} all && exit 0) || exit -1)
 
 .PHONY: test-userspace
 test-userspace:

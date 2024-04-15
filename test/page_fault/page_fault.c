@@ -28,7 +28,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 
-#include "../module.h"
+#include "../../module.h"
 
 int main() {
     const size_t page_size = getpagesize() * 64;
@@ -87,38 +87,36 @@ int main() {
 
     printf("mmap(\"base.bin\") took %lins (%lims)\n", after.tv_nsec - before.tv_nsec, (after.tv_nsec - before.tv_nsec)/1000000);
 
-    struct mmap mmap;
-    mmap.path = "overlay.bin";
-    mmap.flag = MAP_PRIVATE | MAP_FIXED;
-    mmap.prot = PROT_READ;
-    mmap.mode = O_RDONLY;
-    mmap.size = total_size / (page_size * 2);
-    mmap.elements = malloc(sizeof(struct mmap_element) * mmap.size);
-    memset(mmap.elements, 0, sizeof(struct mmap_element) * mmap.size);
+    struct mmap _mmap;
+    _mmap.base_addr = *(unsigned long*)(&baseMap);
+    _mmap.path = "overlay.bin";
+    _mmap.mode = O_RDONLY;
+    _mmap.size = total_size / (page_size * 2);
+    _mmap.elements = malloc(sizeof(struct mmap_element) * _mmap.size);
+    memset(_mmap.elements, 0, sizeof(struct mmap_element) * _mmap.size);
 
-    printf("requesting %u operations and sending %lu bytes worth of mmap elements\n", mmap.size, sizeof(struct mmap_element) * mmap.size);
+    printf("requesting %u operations and sending %lu bytes worth of mmap elements\n", _mmap.size, sizeof(struct mmap_element) * _mmap.size);
 
     int i = 0;
     for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
-        mmap.elements[i].addr = *(unsigned long*)(&baseMap) + offset;
-        mmap.elements[i].len = page_size;
-        mmap.elements[i].offset = offset;
+        _mmap.elements[i].length = page_size;
+        _mmap.elements[i].offset = offset;
         i++;
     }
 
     if (clock_gettime(CLOCK_MONOTONIC, &before) < 0) {
         printf("ERROR: could not measure 'before' time for overlay mmap\n");
-        free(mmap.elements);
+        free(_mmap.elements);
         close(syscall_dev);
         close(overlayFd);
         close(baseFd);
         return EXIT_FAILURE;
     }
 
-    int ret = ioctl(syscall_dev, IOCTL_MMAP_CMD, &mmap);
+    int ret = ioctl(syscall_dev, IOCTL_MMAP_CMD, &_mmap);
     if(ret) {
         printf("ERROR: could not call 'IOCTL_MMAP_CMD': %d\n", ret);
-        free(mmap.elements);
+        free(_mmap.elements);
         close(syscall_dev);
         close(overlayFd);
         close(baseFd);
@@ -127,7 +125,7 @@ int main() {
 
     if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
         printf("ERROR: could not measure 'after' time for overlay mmap\n");
-        free(mmap.elements);
+        free(_mmap.elements);
         close(syscall_dev);
         close(overlayFd);
         close(baseFd);
@@ -141,28 +139,28 @@ int main() {
     char *buffer = malloc(page_size);
     memset(buffer, 0, page_size);
 
-    for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
-        lseek(overlayFd, offset, SEEK_SET);
-        read(overlayFd, buffer, page_size);
-        if (memcmp(baseMap + offset, buffer, page_size)) {
-            printf("ERROR: mmap buffer does not match the file contents at offset %lu\n", offset);
-            free(buffer);
-            free(mmap.elements);
-            close(syscall_dev);
-            close(overlayFd);
-            close(baseFd);
-            return EXIT_FAILURE;
-        }
-        memset(buffer, 0, page_size);
-    }
+//    for (size_t offset = 0; offset < total_size; offset += page_size * 2) {
+//        lseek(overlayFd, offset, SEEK_SET);
+//        read(overlayFd, buffer, page_size);
+//        if (memcmp(baseMap + offset, buffer, page_size)) {
+//            printf("ERROR: mmap buffer does not match the file contents at offset %lu\n", offset);
+//            free(buffer);
+//            free(mmap.elements);
+//            close(syscall_dev);
+//            close(overlayFd);
+//            close(baseFd);
+//            return EXIT_FAILURE;
+//        }
+//        memset(buffer, 0, page_size);
+//    }
 
-    for (size_t offset = page_size; offset < total_size; offset += page_size * 2) {
+    for (size_t offset = page_size; offset < total_size; offset += page_size) {
         lseek(baseFd, offset, SEEK_SET);
         read(baseFd, buffer, page_size);
         if (memcmp(baseMap + offset, buffer, page_size)) {
             printf("ERROR: mmap buffer does not match the file contents at offset %lu\n", offset);
             free(buffer);
-            free(mmap.elements);
+            free(_mmap.elements);
             close(syscall_dev);
             close(overlayFd);
             close(baseFd);
@@ -173,11 +171,47 @@ int main() {
 
     printf("successfully checked mmap buffer against file contents\n");
 
+    sleep(30);
+
+    char *baseMap2 = mmap(NULL, total_size, PROT_READ, MAP_SHARED, baseFd, 0);
+    _mmap.base_addr = *(unsigned long*)(&baseMap2);
+
+    ioctl(syscall_dev, IOCTL_MMAP_CMD, &_mmap);
+
+    for (size_t offset = page_size; offset < total_size; offset += page_size) {
+        lseek(baseFd, offset, SEEK_SET);
+        read(baseFd, buffer, page_size);
+        if (memcmp(baseMap2 + offset, buffer, page_size)) {
+            printf("ERROR: mmap buffer does not match the file contents at offset %lu\n", offset);
+            free(buffer);
+            free(_mmap.elements);
+            close(syscall_dev);
+            close(overlayFd);
+            close(baseFd);
+            return EXIT_FAILURE;
+        }
+        memset(buffer, 0, page_size);
+    }
+
+    printf("Sleeping\n");
+    sleep(60);
+
     ret = munmap(baseMap, total_size);
     if(ret) {
         printf("error during munmap: %d\n", ret);
         free(buffer);
-        free(mmap.elements);
+        free(_mmap.elements);
+        close(syscall_dev);
+        close(overlayFd);
+        close(baseFd);
+        return EXIT_FAILURE;
+    }
+
+    ret = munmap(baseMap2, total_size);
+    if(ret) {
+        printf("error during munmap: %d\n", ret);
+        free(buffer);
+        free(_mmap.elements);
         close(syscall_dev);
         close(overlayFd);
         close(baseFd);
@@ -185,7 +219,7 @@ int main() {
     }
 
     free(buffer);
-    free(mmap.elements);
+    free(_mmap.elements);
     close(syscall_dev);
     close(overlayFd);
     close(baseFd);

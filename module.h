@@ -23,16 +23,13 @@
 #define MAGIC 's'
 
 struct mmap_element {
-    unsigned long addr;
-    unsigned long len;
     unsigned long offset;
-    unsigned long ret;
+    unsigned long length;
 };
 
 struct mmap {
+    unsigned long base_addr;
     char* path;
-    unsigned long flag;
-    unsigned long prot;
     unsigned short mode;
     unsigned int size;
     struct mmap_element* elements;

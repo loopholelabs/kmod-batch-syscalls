@@ -24,10 +24,12 @@ import (
 )
 
 func main() {
-	pageSize := os.Getpagesize() * 64
-	totalSize := pageSize * 1024 * 8
+	pageSize := os.Getpagesize()
+	totalSize := pageSize * 1024 * 1024
 
-	fmt.Printf("using pageSize %d with totalSize %d\n", pageSize, totalSize)
+	fmt.Printf("using page size %d bytes with total size %d bytes (%d mB)\n", pageSize, totalSize, totalSize/1024/1024)
+
+	fmt.Printf("creating 'base.bin'\n")
 
 	{
 		out, err := os.OpenFile("base.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
@@ -36,13 +38,21 @@ func main() {
 		}
 		defer out.Close()
 
-		if err := out.Truncate(int64(totalSize)); err != nil {
-			panic(err)
-		}
+		in, err := os.Open("/dev/random")
+        if err != nil {
+            panic(err)
+        }
+        defer in.Close()
+
+        if _, err := io.CopyN(out, in, int64(totalSize)); err != nil {
+            panic(err)
+        }
 	}
 
+	fmt.Printf("creating 'overlay1.bin'\n")
+
 	{
-		out, err := os.OpenFile("overlay.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
+		out, err := os.OpenFile("overlay1.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
 		if err != nil {
 			panic(err)
 		}
@@ -58,4 +68,24 @@ func main() {
 			panic(err)
 		}
 	}
+
+	fmt.Printf("creating 'overlay2.bin'\n")
+
+	{
+    		out, err := os.OpenFile("overlay2.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
+    		if err != nil {
+    			panic(err)
+    		}
+    		defer out.Close()
+
+    		in, err := os.Open("/dev/random")
+    		if err != nil {
+    			panic(err)
+    		}
+    		defer in.Close()
+
+    		if _, err := io.CopyN(out, in, int64(totalSize)); err != nil {
+    			panic(err)
+    		}
+    	}
 }
