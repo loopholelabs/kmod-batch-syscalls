@@ -23,8 +23,11 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <linux/device.h>
 #include <linux/time.h>
+#include <linux/xarray.h>
+#include <linux/percpu_counter.h>
 
 #include <asm/io.h>
 
@@ -35,251 +38,243 @@ MODULE_AUTHOR("Loophole Labs (Shivansh Vij)");
 MODULE_DESCRIPTION("Batch Syscalls");
 MODULE_LICENSE("GPL");
 
+static struct xarray elements;
 static struct vm_operations_struct hijacked_vm_ops;
-static struct file* overlay_file_ptr;
-static vm_fault_t (*original_page_fault)(struct vm_fault *vmf);
-static vm_fault_t (*original_map_pages)(struct vm_fault *vmf, pgoff_t start_pgoff, pgoff_t end_pgoff);
 
-static vm_fault_t hijacked_page_fault(struct vm_fault *vmf) {
-    log_info("got hijacked page fault");
-    return original_page_fault(vmf);
+static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
+				     pgoff_t end_pgoff)
+{
+	// TODO: handle case where ->prealloc_pte is set.
+	// This happens when a PMD entry does not exist for the faulting address,
+	// such as when the faulted page is the first one in the address space.
+	if (vmf->prealloc_pte)
+		goto out;
+
+#ifdef BENCHMARK
+	ktime_t start = ktime_get();
+#endif
+	// Verify if reading memory from base or overlay.
+	void *el = xa_load(&elements, vmf->pgoff);
+	if (!el)
+		goto out;
+
+	log_debug(
+		"page fault on overlay area page=%lu pud=0x%llu pmd=0x%llu addr=0x%lu",
+		vmf->pgoff, pud_val(*(vmf->pud)), pmd_val(*(vmf->pmd)),
+		vmf->address);
+
+	// Find page from overlay memory area and load it into memory.
+	struct page *src_page;
+	struct vm_area_struct *overlay_vma = ((struct mmap_element *)el)->vma;
+	unsigned long src_addr = overlay_vma->vm_start + vmf->pgoff * PAGE_SIZE;
+
+	int nr_pages = get_user_pages_fast(src_addr, 1, 0, &src_page);
+	if (nr_pages != 1) {
+		log_error("expected 1 page, got %d", nr_pages);
+		goto out;
+	}
+
+#ifdef DEBUG
+	unsigned long pfn = page_to_pfn(src_page);
+	log_debug("found overlay page addr=0x%lu pfn=0x%lu",
+		  overlay_vma->vm_start, pfn);
+#endif
+
+	// Load folio for source page to increment its reference count.
+	struct folio *folio = page_folio(src_page);
+	folio_get(folio);
+
+	// Create page table entry for faulted address.
+	unsigned long dst_addr = vmf->vma->vm_start + vmf->pgoff * PAGE_SIZE;
+	pte_t *ptep = pte_offset_kernel(vmf->pmd, dst_addr);
+	pte_t pte = mk_pte(src_page, overlay_vma->vm_page_prot);
+
+	log_debug(
+		"setting PTE on base memory to overlay page addr=0x%lu pte=0x%llu",
+		dst_addr, pte_val(pte));
+	set_pte(ptep, pte);
+
+#ifdef DEBUG
+	struct page *dst_page = pte_page(pte);
+	unsigned long dst_pfn = page_to_pfn(dst_page);
+	log_debug("overlaid page on base memory area pfn=0x%lu", dst_pfn);
+#endif
+
+	// Increment MM_FILEPAGES counter to prevent "Bad rss-counter state" bug.
+	percpu_counter_inc(&vmf->vma->vm_mm->rss_stat[MM_FILEPAGES]);
+
+	// Don't call put_page() or folio_put() because the page and folio are
+	// being reference by the new PTE.
+
+#ifdef BENCHMARK
+	s64 elapsed = ktime_to_ns(ktime_sub(ktime_get(), start));
+	log_benchmark("page fault handling time: %lldns (%lldms)",
+		      (long long)elapsed, (long long)elapsed / 1000000);
+#endif
+
+	return VM_FAULT_NOPAGE;
+
+out:
+	return filemap_map_pages(vmf, start_pgoff, end_pgoff);
 }
 
-static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff, pgoff_t end_pgoff) {
-    log_info("got hijacked map pages: (%lu - %lu)", start_pgoff, end_pgoff);
-    return original_map_pages(vmf, start_pgoff, end_pgoff);
+static int device_open(struct inode *device_file, struct file *instance)
+{
+	log_debug("called device_open");
+	log_info("device opened");
+	return 0;
 }
 
-static int device_open(struct inode *device_file, struct file *instance) {
-    log_debug("called device_open");
-    log_info("device opened");
-    return 0;
+static int device_close(struct inode *device_file, struct file *instance)
+{
+	log_debug("called device_close");
+	log_info("device closed");
+	return 0;
 }
 
-static int device_close(struct inode *device_file, struct file *instance) {
-    log_debug("called device_close");
-    log_info("device closed");
-    return 0;
+static long int unlocked_ioctl(struct file *file, unsigned cmd,
+			       unsigned long arg)
+{
+	log_debug("called unlocked_ioctl");
+	switch (cmd) {
+	case IOCTL_MMAP_CMD:
+		static struct mmap mmap;
+		unsigned long ret = copy_from_user(&mmap, (struct mmap *)arg,
+						   sizeof(struct mmap));
+		if (ret) {
+			log_error(
+				"unable to copy mmap struct from user during mmap ioctl: %lu",
+				ret);
+			break;
+		}
+		log_debug("base addr: %lu", mmap.base_addr);
+		log_debug("overlay addr: %lu", mmap.overlay_addr);
+
+		// Find overlay VMA to store it into each element.
+		struct vm_area_struct *overlay_vma =
+			find_vma(current->mm, mmap.overlay_addr);
+		if (overlay_vma == NULL ||
+		    overlay_vma->vm_start > mmap.overlay_addr) {
+			log_error("invalid overlay_vma");
+			return -EFAULT;
+		}
+
+		// Read elements from ioctl call.
+		struct mmap_element *els = kvzalloc(
+			sizeof(struct mmap_element) * mmap.size, GFP_KERNEL);
+		if (!els) {
+			log_crit(
+				"unable to allocate elements variable during mmap ioctl");
+			return -ENOMEM;
+		}
+
+		ret = copy_from_user(els, mmap.elements,
+				     sizeof(struct mmap_element) * mmap.size);
+		if (ret) {
+			log_error(
+				"unable to copy elements from user during mmap ioctl: %lu",
+				ret);
+			kvfree(els);
+			break;
+		}
+
+		for (int i = 0; i < mmap.size; i++) {
+			unsigned long start = els[i].pg_start;
+			unsigned long end = els[i].pg_end;
+			els[i].vma = overlay_vma;
+
+			log_info("element to overlay start=%lu end=%lu", start,
+				 end);
+			xa_store_range(&elements, start, end, &els[i],
+				       GFP_KERNEL);
+		}
+
+		// Hijack page fault handler of base file VMA.
+		struct vm_area_struct *base_vma =
+			find_vma(current->mm, mmap.base_addr);
+		if (base_vma == NULL || base_vma->vm_start > mmap.base_addr) {
+			log_error("invalid base_vma");
+			kvfree(els);
+			return -EFAULT;
+		}
+
+		if (!hijacked_vm_ops.fault) {
+			log_info("hijacking vm_ops for base_addr %lu",
+				 mmap.base_addr);
+			memcpy(&hijacked_vm_ops, base_vma->vm_ops,
+			       sizeof(struct vm_operations_struct));
+			hijacked_vm_ops.map_pages = &hijacked_map_pages;
+		}
+		base_vma->vm_ops = &hijacked_vm_ops;
+		log_info("done hijacking vm_ops");
+		return 0;
+	default:
+		log_error("unknown ioctl cmd %x", cmd);
+	}
+	return -EINVAL;
 }
 
-static long int unlocked_ioctl(struct file *file, unsigned cmd, unsigned long arg){
-    log_debug("called unlocked_ioctl");
-    switch(cmd){
-        case IOCTL_MMAP_CMD:
-#ifdef BENCHMARK
-            ktime_t start, end;
-            s64 elapsed;
-#endif
-            struct mmap mmap;
-#ifdef BENCHMARK
-            start = ktime_get();
-#endif
-            unsigned long ret = copy_from_user(&mmap, (struct mmap*)arg, sizeof(struct mmap));
-#ifdef BENCHMARK
-            end = ktime_get();
-            elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_benchmark("copy_from_user mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
-#endif
-            if(ret) {
-                log_error("unable to copy mmap struct from user during mmap ioctl: %lu", ret);
-                break;
-            }
-            long path_len = strnlen_user(mmap.path, PATH_MAX);
-            if(!path_len) {
-                log_error("invalid path length during mmap ioctl");
-                break;
-            } else if (path_len > PATH_MAX) {
-                log_error("path length too large (%ld > %ld) during mmap ioctl", path_len, (long)PATH_MAX);
-                break;
-            }
-            char* path = kmalloc(path_len, GFP_KERNEL);
-            if(!path) {
-                log_crit("unable to allocate path variable during mmap ioctl");
-                return -ENOMEM;
-            }
-            ret = copy_from_user(path, mmap.path, path_len);
-            if(ret) {
-                log_error("unable to copy path from user during mmap ioctl: %lu", ret);
-                kfree(path);
-                break;
-            }
-            path[path_len-1] = '\0';
-            log_debug("opening file '%s' with mode %u (%u) during mmap ioctl", path, mmap.mode, mmap.mode | O_LARGEFILE);
-#ifdef BENCHMARK
-            start = ktime_get();
-#endif
-            overlay_file_ptr = filp_open(path, mmap.mode | O_LARGEFILE, 0);
-#ifdef BENCHMARK
-            end = ktime_get();
-            elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_benchmark("filp_open elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
-#endif
-            if(IS_ERR(overlay_file_ptr)) {
-                log_error("unable to open file '%s' during mmap ioctl: %ld", path, PTR_ERR(overlay_file_ptr));
-                kfree(path);
-                break;
-            }
-            log_info("performing %u mmap operations for '%s' during mmap ioctl", mmap.size, path);
-            log_debug("allocating %lu bytes for mmap elements", sizeof(struct mmap_element) * mmap.size);
-#ifdef BENCHMARK
-            start = ktime_get();
-#endif
-            struct mmap_element* elements = kvzalloc(sizeof(struct mmap_element) * mmap.size, GFP_KERNEL);
-#ifdef BENCHMARK
-            end = ktime_get();
-            elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_benchmark("kvzalloc mmap elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
-#endif
-            if(!elements) {
-                log_crit("unable to allocate elements variable during mmap ioctl");
-                fput(overlay_file_ptr);
-                kfree(path);
-                return -ENOMEM;
-            }
-            log_debug("copying %lu bytes from user for mmap ioctl with path '%s'", sizeof(struct mmap_element) * mmap.size, path);
-#ifdef BENCHMARK
-            start = ktime_get();
-#endif
-            ret = copy_from_user(elements, mmap.elements, sizeof(struct mmap_element) * mmap.size);
-#ifdef BENCHMARK
-            end = ktime_get();
-            elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_benchmark("copy_from_user mmap elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
-#endif
-            if(ret) {
-                log_error("unable to copy elements from user during mmap ioctl: %lu", ret);
-                kvfree(elements);
-                fput(overlay_file_ptr);
-                kfree(path);
-                break;
-            }
-#ifdef BENCHMARK
-            start = ktime_get();
-#endif
-            struct vm_area_struct* base_vma = find_vma(current->mm, mmap.base_addr);
-            if (base_vma == NULL || base_vma->vm_start > mmap.base_addr) {
-                log_error("invalid base_vma");
-                kvfree(elements);
-                fput(overlay_file_ptr);
-                kfree(path);
-                return -EFAULT;
-            }
-
-            if(!hijacked_vm_ops.fault) {
-                log_info("hijacking vm_ops no fault for base_addr %lu", mmap.base_addr);
-                original_page_fault = base_vma->vm_ops->fault;
-                original_map_pages = base_vma->vm_ops->map_pages;
-                memcpy(&hijacked_vm_ops, base_vma->vm_ops, sizeof(struct vm_operations_struct));
-                hijacked_vm_ops.fault = &hijacked_page_fault;
-//                hijacked_vm_ops.huge_fault = NULL;
-//                hijacked_vm_ops.close = NULL;
-//                hijacked_vm_ops.open = NULL;
-//                hijacked_vm_ops.access = NULL;
-//                hijacked_vm_ops.find_special_page = NULL;
-//                hijacked_vm_ops.get_policy = NULL;
-//                hijacked_vm_ops.get_policy = NULL;
-//                hijacked_vm_ops.may_split = NULL;
-//                hijacked_vm_ops.mremap = NULL;
-//                hijacked_vm_ops.mprotect = NULL;
-                hijacked_vm_ops.map_pages = &hijacked_map_pages;
-//                hijacked_vm_ops.pagesize = NULL;
-//                hijacked_vm_ops.page_mkwrite = NULL;
-//                hijacked_vm_ops.pfn_mkwrite = NULL;
-//                hijacked_vm_ops.name = NULL;
-            }
-            base_vma->vm_ops = &hijacked_vm_ops;
-            log_info("done hijacking vm_ops");
-#ifdef BENCHMARK
-            end = ktime_get();
-            elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_benchmark("vm_mmap elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
-#endif
-            kfree(path);
-#ifdef BENCHMARK
-            start = ktime_get();
-#endif
-            ret = copy_to_user(mmap.elements, elements, sizeof(struct mmap_element) * mmap.size);
-#ifdef BENCHMARK
-            end = ktime_get();
-            elapsed = ktime_to_ns(ktime_sub(end, start));
-            log_benchmark("copy_to_user elements elapsed time: %lldns (%lldms)", (long long)elapsed, (long long)elapsed/1000000);
-#endif
-            if(ret) {
-                log_error("unable to copy elements to user during mmap ioctl: %lu", ret);
-                kvfree(elements);
-                break;
-            }
-            kvfree(elements);
-
-            return 0;
-        default:
-            log_error("unknown ioctl cmd %x", cmd);
-    }
-    return -EINVAL;
-}
-
-static struct file_operations file_ops = {
-        .owner = THIS_MODULE,
-        .open = device_open,
-        .release = device_close,
-        .unlocked_ioctl = unlocked_ioctl
-};
+static struct file_operations file_ops = { .owner = THIS_MODULE,
+					   .open = device_open,
+					   .release = device_close,
+					   .unlocked_ioctl = unlocked_ioctl };
 
 static unsigned int major;
 static dev_t device_number;
-static struct class* device_class;
+static struct class *device_class;
 
-static int __init init_mod(void) {
-    log_debug("called init_module");
-    log_info("registering device with major %u and ID '%s'", (unsigned int)MAJOR_DEV, DEVICE_ID);
-    int ret = register_chrdev(MAJOR_DEV, DEVICE_ID, &file_ops);
-    if (!ret) {
-        major = MAJOR_DEV;
-        log_info("registered device (major %d, minor %d)", major, 0);
-        device_number = MKDEV(major, 0);
-    } else if (ret > 0) {
-        major = ret>>20;
-        log_info("registered device (major %d, minor %d)", major, ret&0xfffff);
-        device_number = MKDEV(major, ret&0xfffff);
-    } else {
-        log_error("unable to register device: %d", ret);
-        return ret;
-    }
+static int __init init_mod(void)
+{
+	log_debug("called init_module");
+	xa_init(&elements);
 
-    log_debug("creating device class with ID '%s'", DEVICE_ID);
-    device_class = class_create(DEVICE_ID);
-    if (IS_ERR(device_class)) {
-        log_error("unable to create device class");
-        unregister_chrdev(major, DEVICE_ID);
-        return -EINVAL;
-    }
+	log_info("registering device with major %u and ID '%s'",
+		 (unsigned int)MAJOR_DEV, DEVICE_ID);
+	int ret = register_chrdev(MAJOR_DEV, DEVICE_ID, &file_ops);
+	if (!ret) {
+		major = MAJOR_DEV;
+		log_info("registered device (major %d, minor %d)", major, 0);
+		device_number = MKDEV(major, 0);
+	} else if (ret > 0) {
+		major = ret >> 20;
+		log_info("registered device (major %d, minor %d)", major,
+			 ret & 0xfffff);
+		device_number = MKDEV(major, ret & 0xfffff);
+	} else {
+		log_error("unable to register device: %d", ret);
+		return ret;
+	}
 
-    log_debug("creating device with id '%s'", DEVICE_ID);
-    struct device* device = device_create(device_class, NULL, device_number, NULL, DEVICE_ID);
-    if(IS_ERR(device)) {
-        log_error("unable to create device");
-        class_destroy(device_class);
-        unregister_chrdev(major, DEVICE_ID);
-        return -EINVAL;
-    }
+	log_debug("creating device class with ID '%s'", DEVICE_ID);
+	device_class = class_create(DEVICE_ID);
+	if (IS_ERR(device_class)) {
+		log_error("unable to create device class");
+		unregister_chrdev(major, DEVICE_ID);
+		return -EINVAL;
+	}
 
-    return 0;
+	log_debug("creating device with id '%s'", DEVICE_ID);
+	struct device *device = device_create(device_class, NULL, device_number,
+					      NULL, DEVICE_ID);
+	if (IS_ERR(device)) {
+		log_error("unable to create device");
+		class_destroy(device_class);
+		unregister_chrdev(major, DEVICE_ID);
+		return -EINVAL;
+	}
+
+	return 0;
 }
-static void __exit exit_mod(void) {
-    log_debug("called exit_module");
 
-    if(overlay_file_ptr) {
-        int close_ret = filp_close(overlay_file_ptr, NULL);
-        if(close_ret) {
-            log_error("unable to close overlay_file_ptr during mmap ioctl");
-        }
-        fput(overlay_file_ptr);
-    }
-
-    log_info("unregistering device with major %u and ID '%s'", (unsigned int)major, DEVICE_ID);
-    device_destroy(device_class, device_number);
-    class_destroy(device_class);
-    unregister_chrdev(major, DEVICE_ID);
+static void __exit exit_mod(void)
+{
+	log_debug("called exit_module");
+	log_info("unregistering device with major %u and ID '%s'",
+		 (unsigned int)major, DEVICE_ID);
+	device_destroy(device_class, device_number);
+	class_destroy(device_class);
+	unregister_chrdev(major, DEVICE_ID);
+	xa_destroy(&elements);
 }
 
 module_init(init_mod);

@@ -1,9 +1,11 @@
 .idea
+.ccls-cache
 *.ko
 *.cmd
 *.symvers
 *.order
 *.o
+*.out
 *.o.*
 *.mod
 *.mod.*

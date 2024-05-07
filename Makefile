@@ -2,13 +2,13 @@ obj-m := batch-syscalls.o
 batch-syscalls-objs := module.o log.o
 
 ifdef DEBUG
-	CFLAGS_module.o := -DDEBUG
-    CFLAGS_log.o := -DDEBUG
+	CFLAGS_module.o += -DDEBUG
+	CFLAGS_log.o += -DDEBUG
 endif
 
 ifdef BENCHMARK
-	CFLAGS_module.o := -DBENCHMARK
-	CFLAGS_log.o := -DBENCHMARK
+	CFLAGS_module.o += -DBENCHMARK
+	CFLAGS_log.o += -DBENCHMARK
 endif
 
 clean-files := *.o *.mod.c *.mod.o *.ko *.symvers *.o.d

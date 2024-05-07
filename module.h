@@ -23,18 +23,18 @@
 #define MAGIC 's'
 
 struct mmap_element {
-    unsigned long offset;
-    unsigned long length;
+	unsigned long pg_start;
+	unsigned long pg_end;
+	struct vm_area_struct *vma;
 };
 
 struct mmap {
-    unsigned long base_addr;
-    char* path;
-    unsigned short mode;
-    unsigned int size;
-    struct mmap_element* elements;
+	unsigned long base_addr;
+	unsigned long overlay_addr;
+	unsigned int size;
+	struct mmap_element *elements;
 };
 
-#define IOCTL_MMAP_CMD _IOWR(MAGIC, 1, struct mmap*)
+#define IOCTL_MMAP_CMD _IOWR(MAGIC, 1, struct mmap *)
 
 #endif //BATCH_SYSCALLS_MODULE_H
