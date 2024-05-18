@@ -44,78 +44,22 @@ static struct vm_operations_struct hijacked_vm_ops;
 static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 				     pgoff_t end_pgoff)
 {
-	// TODO: handle case where ->prealloc_pte is set.
-	// This happens when a PMD entry does not exist for the faulting address,
-	// such as when the faulted page is the first one in the address space.
-	if (vmf->prealloc_pte)
-		goto out;
+    for(pgoff_t i = start_pgoff; i <= end_pgoff; i++) {
+        void *el = xa_load(&elements, i);
+        if (!el) {
+            log_debug("page fault in base area with offset 0x%lu for addr 0x%lu", i, vmf->address);
+            filemap_map_pages(vmf, i, i);
+        } else {
+            log_debug("page fault in overlay area with offset 0x%lu for addr 0x%lu", i, vmf->address);
+            struct vm_area_struct *overlay_vma = ((struct mmap_element *)el)->vma;
+            struct file *base_vm_file = vmf->vma->vm_file;
+            vmf->vma->vm_file = overlay_vma->vm_file;
+            filemap_map_pages(vmf, i, i);
+            vmf->vma->vm_file = base_vm_file;
+        }
+    }
 
-#ifdef BENCHMARK
-	ktime_t start = ktime_get();
-#endif
-	// Verify if reading memory from base or overlay.
-	void *el = xa_load(&elements, vmf->pgoff);
-	if (!el)
-		goto out;
-
-	log_debug(
-		"page fault on overlay area page=%lu pud=0x%llu pmd=0x%llu addr=0x%lu",
-		vmf->pgoff, pud_val(*(vmf->pud)), pmd_val(*(vmf->pmd)),
-		vmf->address);
-
-	// Find page from overlay memory area and load it into memory.
-	struct page *src_page;
-	struct vm_area_struct *overlay_vma = ((struct mmap_element *)el)->vma;
-	unsigned long src_addr = overlay_vma->vm_start + vmf->pgoff * PAGE_SIZE;
-
-	int nr_pages = get_user_pages_fast(src_addr, 1, 0, &src_page);
-	if (nr_pages != 1) {
-		log_error("expected 1 page, got %d", nr_pages);
-		goto out;
-	}
-
-#ifdef DEBUG
-	unsigned long pfn = page_to_pfn(src_page);
-	log_debug("found overlay page addr=0x%lu pfn=0x%lu",
-		  overlay_vma->vm_start, pfn);
-#endif
-
-	// Load folio for source page to increment its reference count.
-	struct folio *folio = page_folio(src_page);
-	folio_get(folio);
-
-	// Create page table entry for faulted address.
-	unsigned long dst_addr = vmf->vma->vm_start + vmf->pgoff * PAGE_SIZE;
-	pte_t *ptep = pte_offset_kernel(vmf->pmd, dst_addr);
-	pte_t pte = mk_pte(src_page, overlay_vma->vm_page_prot);
-
-	log_debug(
-		"setting PTE on base memory to overlay page addr=0x%lu pte=0x%llu",
-		dst_addr, pte_val(pte));
-	set_pte(ptep, pte);
-
-#ifdef DEBUG
-	struct page *dst_page = pte_page(pte);
-	unsigned long dst_pfn = page_to_pfn(dst_page);
-	log_debug("overlaid page on base memory area pfn=0x%lu", dst_pfn);
-#endif
-
-	// Increment MM_FILEPAGES counter to prevent "Bad rss-counter state" bug.
-	percpu_counter_inc(&vmf->vma->vm_mm->rss_stat[MM_FILEPAGES]);
-
-	// Don't call put_page() or folio_put() because the page and folio are
-	// being reference by the new PTE.
-
-#ifdef BENCHMARK
-	s64 elapsed = ktime_to_ns(ktime_sub(ktime_get(), start));
-	log_benchmark("page fault handling time: %lldns (%lldms)",
-		      (long long)elapsed, (long long)elapsed / 1000000);
-#endif
-
-	return VM_FAULT_NOPAGE;
-
-out:
-	return filemap_map_pages(vmf, start_pgoff, end_pgoff);
+    return VM_FAULT_NOPAGE;
 }
 
 static int device_open(struct inode *device_file, struct file *instance)

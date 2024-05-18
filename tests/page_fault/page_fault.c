@@ -73,7 +73,7 @@ int main()
 	       (after.tv_nsec - before.tv_nsec) / 1000000);
 
 	// Read overlay test file and create mmap struct.
-	char overlay_file[] = "overlay3.bin";
+	char overlay_file[] = "overlay2.bin";
 	int overlay_fd = open(overlay_file, O_RDONLY);
 	if (overlay_fd < 0) {
 		printf("ERROR: could not open overlay file: %d\n", overlay_fd);
@@ -152,21 +152,25 @@ int main()
 
 		// Verify if reading page from base or overlay.
 		for (int i = 0; i < _mmap.size; i++) {
-			if (pgoff >= _mmap.elements[i].pg_start &&
-			    pgoff <= _mmap.elements[i].pg_end) {
-				printf("checking page %d using overlay\n",
-				       pgoff);
+			if (pgoff >= _mmap.elements[i].pg_start && pgoff <= _mmap.elements[i].pg_end) {
 				fd = overlay_fd;
+                break;
 			}
 		}
+		if(fd == base_fd) {
+            printf("checking page %d using base\n", pgoff);
+        } else if(fd == overlay_fd) {
+            printf("checking page %d using overlay\n", pgoff);
+        } else {
+            printf("not sure what fd we're using\n");
+        }
 
 		size_t offset = pgoff * page_size;
 		lseek(fd, offset, SEEK_SET);
 		read(fd, buffer, page_size);
 
 		if (memcmp(base_map + offset, buffer, page_size)) {
-			printf("ERROR: mmap buffer does not match the file contents at page %d\n",
-			       pgoff);
+			printf("ERROR: mmap buffer does not match the file contents at page %d\n", pgoff);
 			res = EXIT_FAILURE;
 			goto free_buffer;
 		}
