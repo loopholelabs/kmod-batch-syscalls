@@ -62,6 +62,14 @@ int main()
 		goto close_base;
 	}
 
+    char *second_base_mmap =
+            mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
+    if (second_base_mmap == MAP_FAILED) {
+        printf("ERROR: could not mmap second base file\n");
+        res = EXIT_FAILURE;
+        goto close_base;
+    }
+
 	if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
 		printf("ERROR: could not measure 'after' time for base mmap\n");
 		res = EXIT_FAILURE;
@@ -73,7 +81,7 @@ int main()
 	       (after.tv_nsec - before.tv_nsec) / 1000000);
 
 	// Read overlay test file and create mmap struct.
-	char overlay_file[] = "overlay2.bin";
+	char overlay_file[] = "overlay1.bin";
 	int overlay_fd = open(overlay_file, O_RDONLY);
 	if (overlay_fd < 0) {
 		printf("ERROR: could not open overlay file: %d\n", overlay_fd);
@@ -178,6 +186,50 @@ int main()
 	}
 	printf("verification completed successfully!\n");
 
+    for (int pgoff = 0; pgoff < total_size / page_size; pgoff++) {
+        int fd = base_fd;
+        printf("checking page %d using second base\n", pgoff);
+        size_t offset = pgoff * page_size;
+        lseek(fd, offset, SEEK_SET);
+        read(fd, buffer, page_size);
+
+        if (memcmp(second_base_mmap + offset, buffer, page_size)) {
+            printf("ERROR: mmap second buffer does not match the file contents at page %d\n", pgoff);
+            res = EXIT_FAILURE;
+            goto free_buffer;
+        }
+        memset(buffer, 0, page_size);
+    }
+    printf("second verification completed successfully!\n");
+
+    char *third_base_mmap =
+            mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
+    if (third_base_mmap == MAP_FAILED) {
+        printf("ERROR: could not mmap third base file\n");
+        res = EXIT_FAILURE;
+        goto free_buffer;
+    }
+
+    for (int pgoff = 0; pgoff < total_size / page_size; pgoff++) {
+        int fd = base_fd;
+        printf("checking page %d using third base\n", pgoff);
+        size_t offset = pgoff * page_size;
+        lseek(fd, offset, SEEK_SET);
+        read(fd, buffer, page_size);
+
+        if (memcmp(third_base_mmap + offset, buffer, page_size)) {
+            printf("ERROR: mmap third buffer does not match the file contents at page %d\n", pgoff);
+            res = EXIT_FAILURE;
+            goto free_buffer;
+        }
+        memset(buffer, 0, page_size);
+    }
+    printf("third verification completed successfully!\n");
+
+    sleep(60);
+
+    munmap(third_base_mmap, total_size);
+
 free_buffer:
 	free(buffer);
 close_syscall_dev:
@@ -189,6 +241,7 @@ unmap_overlay:
 close_overlay:
 	close(overlay_fd);
 unmap_base:
+    munmap(second_base_mmap, total_size);
 	munmap(base_map, total_size);
 close_base:
 	close(base_fd);
