@@ -44,22 +44,73 @@ static struct vm_operations_struct hijacked_vm_ops;
 static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 				     pgoff_t end_pgoff)
 {
-    for(pgoff_t i = start_pgoff; i <= end_pgoff; i++) {
-        void *el = xa_load(&elements, i);
-        if (!el) {
-            log_debug("page fault in base area with offset 0x%lu for addr 0x%lu", i, vmf->address);
-            filemap_map_pages(vmf, i, i);
-        } else {
-            log_debug("page fault in overlay area with offset 0x%lu for addr 0x%lu", i, vmf->address);
-            struct vm_area_struct *overlay_vma = ((struct mmap_element *)el)->vma;
-            struct file *base_vm_file = vmf->vma->vm_file;
-            vmf->vma->vm_file = overlay_vma->vm_file;
-            filemap_map_pages(vmf, i, i);
-            vmf->vma->vm_file = base_vm_file;
-        }
-    }
+	log_debug("page fault page=%lu start=%lu end=%lu", vmf->pgoff,
+		  start_pgoff, end_pgoff);
 
-    return VM_FAULT_NOPAGE;
+	struct file *base_vm_file = vmf->vma->vm_file;
+	struct mmap_element *el;
+
+	unsigned long min_idx = start_pgoff;
+	el = xa_find(&elements, &min_idx, end_pgoff, XA_PRESENT);
+	if (el == NULL) {
+		log_debug("fault around doesn't overlap with any element");
+		return filemap_map_pages(vmf, start_pgoff, end_pgoff);
+	}
+
+	vm_fault_t ret;
+	pgoff_t start, end;
+	for (pgoff_t i = start_pgoff; i <= end_pgoff;) {
+		// The rest of the range doesn't overlap with any element.
+		if (el == NULL) {
+			start = i;
+			end = end_pgoff;
+			log_debug("handling base page fault start=%lu end=%lu",
+				  start, end);
+			return filemap_map_pages(vmf, start, end);
+		}
+
+		// Current page is before the next element, handle the range until the
+		// element starts.
+		if (i < el->pg_start) {
+			start = i;
+			end = el->pg_start - 1;
+			log_debug("handling base page fault start=%lu end=%lu",
+				  start, end);
+
+			ret = filemap_map_pages(vmf, start, end);
+			if (ret & VM_FAULT_ERROR) {
+				return ret;
+			}
+
+			i = end + 1;
+			continue;
+		}
+
+		// Handle fault on overlay element.
+		start = el->pg_start;
+		end = el->pg_end;
+		log_debug("handling overlay page fault start=%lu end=%lu",
+			  start, end);
+
+		// TODO: acquire write lock on vmf->vma->vm_mm. A read lock may have
+		// already been acquired.
+		// https://docs.kernel.org/filesystems/locking.html#vm-operations-struct
+		vmf->vma->vm_file = el->vma->vm_file;
+		ret = filemap_map_pages(vmf, start, end);
+		vmf->vma->vm_file = base_vm_file;
+		if (ret & VM_FAULT_ERROR)
+			return ret;
+
+		// Find the next element in range (if any).
+		min_idx = end;
+		el = xa_find_after(&elements, &min_idx, end_pgoff, XA_PRESENT);
+
+		i = end + 1;
+		continue;
+	}
+
+	// Should never happen.
+	return VM_FAULT_SIGBUS;
 }
 
 static int device_open(struct inode *device_file, struct file *instance)
