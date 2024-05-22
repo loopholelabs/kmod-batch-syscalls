@@ -47,70 +47,57 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 	log_debug("page fault page=%lu start=%lu end=%lu", vmf->pgoff,
 		  start_pgoff, end_pgoff);
 
+	XA_STATE(xas, &elements, start_pgoff);
+
 	struct file *base_vm_file = vmf->vma->vm_file;
 	struct mmap_element *el;
-
-	unsigned long min_idx = start_pgoff;
-	el = xa_find(&elements, &min_idx, end_pgoff, XA_PRESENT);
-	if (el == NULL) {
-		log_debug("fault around doesn't overlap with any element");
-		return filemap_map_pages(vmf, start_pgoff, end_pgoff);
-	}
-
 	vm_fault_t ret;
-	pgoff_t start, end;
-	for (pgoff_t i = start_pgoff; i <= end_pgoff;) {
-		// The rest of the range doesn't overlap with any element.
+	pgoff_t end;
+
+	rcu_read_lock();
+	for (pgoff_t start = start_pgoff; start <= end_pgoff; start = end + 1) {
+		do {
+			el = xas_find(&xas, end_pgoff);
+		} while (xas_retry(&xas, el));
+
+		// The range doesn't overlap with any element, so handle it like a
+		// normal page fault.
 		if (el == NULL) {
-			start = i;
 			end = end_pgoff;
 			log_debug("handling base page fault start=%lu end=%lu",
 				  start, end);
-			return filemap_map_pages(vmf, start, end);
+			ret = filemap_map_pages(vmf, start, end);
+			break;
 		}
 
-		// Current page is before the next element, handle the range until the
-		// element starts.
-		if (i < el->pg_start) {
-			start = i;
+		// Handle any non-overlay range before the next element.
+		if (start < el->pg_start) {
 			end = el->pg_start - 1;
 			log_debug("handling base page fault start=%lu end=%lu",
 				  start, end);
 
 			ret = filemap_map_pages(vmf, start, end);
-			if (ret & VM_FAULT_ERROR) {
-				return ret;
-			}
-
-			i = end + 1;
-			continue;
+			if (ret & VM_FAULT_ERROR)
+				break;
 		}
 
-		// Handle fault on overlay element.
+		// Handle fault over overlay range.
 		start = el->pg_start;
-		end = el->pg_end;
+		end = min(el->pg_end, end_pgoff);
 		log_debug("handling overlay page fault start=%lu end=%lu",
 			  start, end);
 
-		// TODO: acquire write lock on vmf->vma->vm_mm. A read lock may have
-		// already been acquired.
+		// TODO: acquire write lock on vmf->vma->vm_mm.
+		// A read lock may have already been acquired.
 		// https://docs.kernel.org/filesystems/locking.html#vm-operations-struct
 		vmf->vma->vm_file = el->vma->vm_file;
 		ret = filemap_map_pages(vmf, start, end);
 		vmf->vma->vm_file = base_vm_file;
 		if (ret & VM_FAULT_ERROR)
-			return ret;
-
-		// Find the next element in range (if any).
-		min_idx = end;
-		el = xa_find_after(&elements, &min_idx, end_pgoff, XA_PRESENT);
-
-		i = end + 1;
-		continue;
+			break;
 	}
-
-	// Should never happen.
-	return VM_FAULT_SIGBUS;
+	rcu_read_unlock();
+	return ret;
 }
 
 static int device_open(struct inode *device_file, struct file *instance)
