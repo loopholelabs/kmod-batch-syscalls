@@ -331,5 +331,6 @@ unmap_base:
 close_base:
 	close(base_fd);
 
+	printf("done\n");
 	return res;
 }

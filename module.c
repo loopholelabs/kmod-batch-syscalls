@@ -81,6 +81,8 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 	pgoff_t end;
 
 	rcu_read_lock();
+	spin_lock(&mem_overlay->lock);
+
 	for (pgoff_t start = start_pgoff; start <= end_pgoff; start = end + 1) {
 		do {
 			seg = xas_find(&xas, end_pgoff);
@@ -125,6 +127,8 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 		if (ret & VM_FAULT_ERROR)
 			break;
 	}
+
+	spin_unlock(&mem_overlay->lock);
 	rcu_read_unlock();
 	return ret;
 }
