@@ -31,12 +31,70 @@
 
 #include "../../module.h"
 
+struct test_case {
+	unsigned long pgoff;
+	int fd;
+	char *data;
+};
+
+size_t page_size, total_size;
+
+bool verify_test_cases(struct test_case *tcs, int tcs_nr, int base_fd,
+		       char *base_map)
+{
+	char *buffer = malloc(page_size);
+	memset(buffer, 0, page_size);
+	bool valid = true;
+
+	for (unsigned long pgoff = 0; pgoff < total_size / page_size; pgoff++) {
+		size_t offset = pgoff * page_size;
+
+		struct test_case *tc = NULL;
+		for (int i = 0; i < tcs_nr; i++) {
+			if (tcs[i].pgoff == pgoff) {
+				tc = &tcs[i];
+				break;
+			}
+		}
+
+		int fd = base_fd;
+		if (tc != NULL) {
+			if (tc->fd > 0) {
+				fd = tc->fd;
+				printf("checking if page %lu is from overlay\n",
+				       pgoff);
+			} else if (tc->data) {
+				printf("checking if page %lu has expected data\n",
+				       pgoff);
+				memcpy(buffer, tc->data, page_size);
+				fd = -1;
+			}
+		}
+
+		if (fd > 0) {
+			lseek(fd, offset, SEEK_SET);
+			read(fd, buffer, page_size);
+		}
+
+		if (memcmp(base_map + offset, buffer, page_size)) {
+			printf("== ERROR: base memory does not match the file contents at page %lu\n",
+			       pgoff);
+			valid = false;
+			break;
+		}
+		memset(buffer, 0, page_size);
+	}
+
+	free(buffer);
+	return valid;
+}
+
 int main()
 {
 	int res = EXIT_SUCCESS;
 
-	const size_t page_size = sysconf(_SC_PAGESIZE);
-	const size_t total_size = page_size * 1024; // * 1024;
+	page_size = sysconf(_SC_PAGESIZE);
+	total_size = page_size * 1024; // * 1024;
 	printf("Using pagesize %lu with total size %lu\n", page_size,
 	       total_size);
 
@@ -54,21 +112,21 @@ int main()
 		goto close_base;
 	}
 
-	char *base_map =
-		mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
-	if (base_map == MAP_FAILED) {
+	char *base_mmap = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
+			       MAP_PRIVATE, base_fd, 0);
+	if (base_mmap == MAP_FAILED) {
 		printf("ERROR: could not mmap base file\n");
 		res = EXIT_FAILURE;
 		goto close_base;
 	}
 
-    char *second_base_mmap =
-            mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
-    if (second_base_mmap == MAP_FAILED) {
-        printf("ERROR: could not mmap second base file\n");
-        res = EXIT_FAILURE;
-        goto close_base;
-    }
+	char *clean_base_mmap =
+		mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
+	if (clean_base_mmap == MAP_FAILED) {
+		printf("ERROR: could not mmap second base file\n");
+		res = EXIT_FAILURE;
+		goto close_base;
+	}
 
 	if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
 		printf("ERROR: could not measure 'after' time for base mmap\n");
@@ -98,24 +156,32 @@ int main()
 	}
 
 	struct mmap _mmap;
-	_mmap.base_addr = *(unsigned long *)(&base_map);
+	_mmap.base_addr = *(unsigned long *)(&base_mmap);
 	_mmap.overlay_addr = *(unsigned long *)(&overlay_map);
-	_mmap.size = 2;
+	_mmap.size = 5;
 	_mmap.elements = malloc(sizeof(struct mmap_element) * _mmap.size);
 	memset(_mmap.elements, 0, sizeof(struct mmap_element) * _mmap.size);
 
 	printf("requesting %u operations and sending %lu bytes worth of mmap elements\n",
 	       _mmap.size, sizeof(struct mmap_element) * _mmap.size);
 
-	// Mark the parts of the memory area as elements to be overlaid.
-	// In this test, each element is two pages in size and skips one page
-	// between them, creating a pattern like this:
-	// _XX_XX_XX_XX_XX
-	for (int i = 0; i < _mmap.size; i++) {
-		// TODO: fix module to handle first page in address space.
-		_mmap.elements[i].pg_start = 3 * i + 1;
-		_mmap.elements[i].pg_end = 3 * i + 2;
-	}
+	// Overlay single page.
+	_mmap.elements[0].pg_start = 0;
+	_mmap.elements[0].pg_end = 0;
+
+	// Overlay multiple pages.
+	_mmap.elements[1].pg_start = 4;
+	_mmap.elements[1].pg_end = 6;
+
+	// Two overlays back-to-back.
+	_mmap.elements[2].pg_start = 20;
+	_mmap.elements[2].pg_end = 20;
+	_mmap.elements[3].pg_start = 21;
+	_mmap.elements[3].pg_end = 21;
+
+	// Large overlay that crosses fault-around borders.
+	_mmap.elements[4].pg_start = 30;
+	_mmap.elements[4].pg_end = 50;
 
 	// Call kernel module with ioctl call to the character device.
 	int syscall_dev = open("/dev/batch_syscalls", O_WRONLY);
@@ -149,89 +215,95 @@ int main()
 	       _mmap.size, after.tv_nsec - before.tv_nsec,
 	       (after.tv_nsec - before.tv_nsec) / 1000000);
 
-	// Verify resulting memory.
-	printf("checking mmap buffer against file contents\n");
-
-	char *buffer = malloc(page_size);
-	memset(buffer, 0, page_size);
-
-	for (int pgoff = 0; pgoff < total_size / page_size; pgoff++) {
-		int fd = base_fd;
-
-		// Verify if reading page from base or overlay.
-		for (int i = 0; i < _mmap.size; i++) {
-			if (pgoff >= _mmap.elements[i].pg_start && pgoff <= _mmap.elements[i].pg_end) {
-				fd = overlay_fd;
-                break;
-			}
-		}
-		if(fd == base_fd) {
-            printf("checking page %d using base\n", pgoff);
-        } else if(fd == overlay_fd) {
-            printf("checking page %d using overlay\n", pgoff);
-        } else {
-            printf("not sure what fd we're using\n");
-        }
-
-		size_t offset = pgoff * page_size;
-		lseek(fd, offset, SEEK_SET);
-		read(fd, buffer, page_size);
-
-		if (memcmp(base_map + offset, buffer, page_size)) {
-			printf("ERROR: mmap buffer does not match the file contents at page %d\n", pgoff);
-			res = EXIT_FAILURE;
-			goto free_buffer;
-		}
-		memset(buffer, 0, page_size);
+	// Verify reading memory.
+	int tcs_nr = 27;
+	struct test_case *tcs = malloc(sizeof(struct test_case) * tcs_nr);
+	tcs[0].pgoff = 0;
+	tcs[0].fd = overlay_fd;
+	tcs[1].pgoff = 4;
+	tcs[1].fd = overlay_fd;
+	tcs[2].pgoff = 5;
+	tcs[2].fd = overlay_fd;
+	tcs[3].pgoff = 6;
+	tcs[3].fd = overlay_fd;
+	tcs[4].pgoff = 20;
+	tcs[4].fd = overlay_fd;
+	tcs[5].pgoff = 21;
+	tcs[5].fd = overlay_fd;
+	for (int i = 6, j = 30; j <= 50; i++, j++) {
+		tcs[i].pgoff = j;
+		tcs[i].fd = overlay_fd;
 	}
-	printf("verification completed successfully!\n");
 
-    for (int pgoff = 0; pgoff < total_size / page_size; pgoff++) {
-        int fd = base_fd;
-        printf("checking page %d using second base\n", pgoff);
-        size_t offset = pgoff * page_size;
-        lseek(fd, offset, SEEK_SET);
-        read(fd, buffer, page_size);
+	printf("= TEST: checking memory contents with overlay\n");
+	if (!verify_test_cases(tcs, tcs_nr, base_fd, base_mmap)) {
+		res = EXIT_FAILURE;
+		free(tcs);
+		goto close_syscall_dev;
+	}
+	printf("== OK: overlay memory verification completed successfully!\n");
 
-        if (memcmp(second_base_mmap + offset, buffer, page_size)) {
-            printf("ERROR: mmap second buffer does not match the file contents at page %d\n", pgoff);
-            res = EXIT_FAILURE;
-            goto free_buffer;
-        }
-        memset(buffer, 0, page_size);
-    }
-    printf("second verification completed successfully!\n");
+	printf("= TEST: checking memory contents without overlay\n");
+	if (!verify_test_cases(NULL, 0, base_fd, clean_base_mmap)) {
+		res = EXIT_FAILURE;
+		free(tcs);
+		goto close_syscall_dev;
+	}
+	free(tcs);
+	printf("== OK: non-overlay memory verification completed successfully!\n");
 
-    char *third_base_mmap =
-            mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
-    if (third_base_mmap == MAP_FAILED) {
-        printf("ERROR: could not mmap third base file\n");
-        res = EXIT_FAILURE;
-        goto free_buffer;
-    }
+	// TODO: parse /proc/<pid>/smaps to verify memory sharing.
 
-    for (int pgoff = 0; pgoff < total_size / page_size; pgoff++) {
-        int fd = base_fd;
-        printf("checking page %d using third base\n", pgoff);
-        size_t offset = pgoff * page_size;
-        lseek(fd, offset, SEEK_SET);
-        read(fd, buffer, page_size);
+	// Verify writing to memory.
+	int rand_fd = open("/dev/random", O_RDONLY);
+	if (rand_fd < 0) {
+		printf("ERROR: could not open /dev/random: %d\n", rand_fd);
+		res = EXIT_FAILURE;
+		goto close_syscall_dev;
+	}
 
-        if (memcmp(third_base_mmap + offset, buffer, page_size)) {
-            printf("ERROR: mmap third buffer does not match the file contents at page %d\n", pgoff);
-            res = EXIT_FAILURE;
-            goto free_buffer;
-        }
-        memset(buffer, 0, page_size);
-    }
-    printf("third verification completed successfully!\n");
+	char *rand = malloc(page_size);
+	memset(rand, 0, page_size);
+	read(rand_fd, rand, page_size);
+	close(rand_fd);
 
-    sleep(60);
+	// Write to non-overlay page.
+	memcpy(base_mmap + page_size * 10, rand, page_size);
+	// Write to overlay page.
+	memcpy(base_mmap + page_size * 4, rand, page_size);
 
-    munmap(third_base_mmap, total_size);
+	tcs_nr = 28;
+	tcs = malloc(sizeof(struct test_case) * tcs_nr);
+	tcs[0].pgoff = 0;
+	tcs[0].fd = overlay_fd;
+	tcs[1].pgoff = 4;
+	tcs[1].data = rand;
+	tcs[2].pgoff = 5;
+	tcs[2].fd = overlay_fd;
+	tcs[3].pgoff = 6;
+	tcs[3].fd = overlay_fd;
+	tcs[4].pgoff = 10;
+	tcs[4].data = rand;
+	tcs[5].pgoff = 20;
+	tcs[5].fd = overlay_fd;
+	tcs[6].pgoff = 21;
+	tcs[6].fd = overlay_fd;
+	for (int i = 7, j = 30; j <= 50; i++, j++) {
+		tcs[i].pgoff = j;
+		tcs[i].fd = overlay_fd;
+	}
 
-free_buffer:
-	free(buffer);
+	printf("= TEST: checking memory write\n");
+	if (!verify_test_cases(tcs, tcs_nr, base_fd, base_mmap)) {
+		res = EXIT_FAILURE;
+		free(tcs);
+		free(rand);
+		goto close_syscall_dev;
+	}
+	free(tcs);
+	free(rand);
+	printf("== OK: memory write verification completed successfully!\n");
+
 close_syscall_dev:
 	close(syscall_dev);
 free_elements:
@@ -241,8 +313,8 @@ unmap_overlay:
 close_overlay:
 	close(overlay_fd);
 unmap_base:
-    munmap(second_base_mmap, total_size);
-	munmap(base_map, total_size);
+	munmap(clean_base_mmap, total_size);
+	munmap(base_mmap, total_size);
 close_base:
 	close(base_fd);
 
