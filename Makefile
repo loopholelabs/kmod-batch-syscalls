@@ -1,15 +1,8 @@
 obj-m := batch-syscalls.o
-batch-syscalls-objs := module.o log.o
+batch-syscalls-objs := module.o log.o hashtable.o
 
-ifdef DEBUG
-	CFLAGS_module.o += -DDEBUG
-	CFLAGS_log.o += -DDEBUG
-endif
-
-ifdef BENCHMARK
-	CFLAGS_module.o += -DBENCHMARK
-	CFLAGS_log.o += -DBENCHMARK
-endif
+LOG_LEVEL ?= 1
+ccflags-y += -DLOG_LEVEL=${LOG_LEVEL}
 
 clean-files := *.o *.mod.c *.mod.o *.ko *.symvers *.o.d
 
