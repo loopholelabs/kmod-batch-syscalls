@@ -18,6 +18,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -86,6 +87,41 @@ func main() {
 
 		if _, err := io.CopyN(out, in, int64(totalSize)); err != nil {
 			panic(err)
+		}
+	}
+
+	fmt.Println("creating 'overlay3.bin'")
+
+	{
+		out, err := os.OpenFile("overlay3.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
+		if err != nil {
+			panic(err)
+		}
+		defer out.Close()
+
+		bufferSize := pageSize
+
+		var one uint8 = 0xFF
+		var zero uint8 = 0x00
+		ones := make([]byte, bufferSize)
+		zeros := make([]byte, bufferSize)
+		for i := 0; i < bufferSize; i++ {
+			ones[i] = one
+			zeros[i] = zero
+		}
+
+		for i := 0; i < totalSize/bufferSize; i++ {
+			if i%2 == 0 {
+				err = binary.Write(out, binary.LittleEndian, zeros)
+				if err != nil {
+					panic(err)
+				}
+			} else {
+				err = binary.Write(out, binary.LittleEndian, ones)
+				if err != nil {
+					panic(err)
+				}
+			}
 		}
 	}
 }
