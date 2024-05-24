@@ -29,7 +29,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#include "../../module.h"
+#include "../../common.h"
 
 struct test_case {
 	unsigned long pgoff;
@@ -138,7 +138,7 @@ int main()
 	       after.tv_nsec - before.tv_nsec,
 	       (after.tv_nsec - before.tv_nsec) / 1000000);
 
-	// Read overlay test file and create mmap struct.
+	// Read overlay test file and create memory overlay request.
 	char overlay_file[] = "overlay1.bin";
 	int overlay_fd = open(overlay_file, O_RDONLY);
 	if (overlay_fd < 0) {
@@ -155,33 +155,36 @@ int main()
 		goto close_overlay;
 	}
 
-	struct mmap _mmap;
-	_mmap.base_addr = *(unsigned long *)(&base_mmap);
-	_mmap.overlay_addr = *(unsigned long *)(&overlay_map);
-	_mmap.size = 5;
-	_mmap.elements = malloc(sizeof(struct mmap_element) * _mmap.size);
-	memset(_mmap.elements, 0, sizeof(struct mmap_element) * _mmap.size);
+	struct mem_overlay_req req;
+	req.base_addr = *(unsigned long *)(&base_mmap);
+	req.overlay_addr = *(unsigned long *)(&overlay_map);
+	req.segments_size = 5;
+	req.segments = malloc(sizeof(struct mem_overlay_segment_req) *
+			      req.segments_size);
+	memset(req.segments, 0,
+	       sizeof(struct mem_overlay_segment_req) * req.segments_size);
 
-	printf("requesting %u operations and sending %lu bytes worth of mmap elements\n",
-	       _mmap.size, sizeof(struct mmap_element) * _mmap.size);
+	printf("requesting %u operations and sending %lu bytes worth of mmap segments\n",
+	       req.segments_size,
+	       sizeof(struct mem_overlay_segment_req) * req.segments_size);
 
 	// Overlay single page.
-	_mmap.elements[0].pg_start = 0;
-	_mmap.elements[0].pg_end = 0;
+	req.segments[0].start_pgoff = 0;
+	req.segments[0].end_pgoff = 0;
 
 	// Overlay multiple pages.
-	_mmap.elements[1].pg_start = 4;
-	_mmap.elements[1].pg_end = 6;
+	req.segments[1].start_pgoff = 4;
+	req.segments[1].end_pgoff = 6;
 
 	// Two overlays back-to-back.
-	_mmap.elements[2].pg_start = 20;
-	_mmap.elements[2].pg_end = 20;
-	_mmap.elements[3].pg_start = 21;
-	_mmap.elements[3].pg_end = 21;
+	req.segments[2].start_pgoff = 20;
+	req.segments[2].end_pgoff = 20;
+	req.segments[3].start_pgoff = 21;
+	req.segments[3].end_pgoff = 21;
 
 	// Large overlay that crosses fault-around borders.
-	_mmap.elements[4].pg_start = 30;
-	_mmap.elements[4].pg_end = 50;
+	req.segments[4].start_pgoff = 30;
+	req.segments[4].end_pgoff = 50;
 
 	// Call kernel module with ioctl call to the character device.
 	int syscall_dev = open("/dev/batch_syscalls", O_WRONLY);
@@ -198,7 +201,7 @@ int main()
 		goto close_syscall_dev;
 	}
 
-	int ret = ioctl(syscall_dev, IOCTL_MMAP_CMD, &_mmap);
+	int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
 	if (ret) {
 		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %d\n", ret);
 		res = EXIT_FAILURE;
@@ -208,11 +211,11 @@ int main()
 	if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
 		printf("ERROR: could not measure 'after' time for overlay mmap\n");
 		res = EXIT_FAILURE;
-		goto close_syscall_dev;
+		goto cleanup;
 	}
 
 	printf("mmap(\"%s\") (%i pages) took %lins (%lims)\n", overlay_file,
-	       _mmap.size, after.tv_nsec - before.tv_nsec,
+	       req.segments_size, after.tv_nsec - before.tv_nsec,
 	       (after.tv_nsec - before.tv_nsec) / 1000000);
 
 	// Verify reading memory.
@@ -239,7 +242,7 @@ int main()
 	if (!verify_test_cases(tcs, tcs_nr, base_fd, base_mmap)) {
 		res = EXIT_FAILURE;
 		free(tcs);
-		goto close_syscall_dev;
+		goto cleanup;
 	}
 	printf("== OK: overlay memory verification completed successfully!\n");
 
@@ -247,7 +250,7 @@ int main()
 	if (!verify_test_cases(NULL, 0, base_fd, clean_base_mmap)) {
 		res = EXIT_FAILURE;
 		free(tcs);
-		goto close_syscall_dev;
+		goto cleanup;
 	}
 	free(tcs);
 	printf("== OK: non-overlay memory verification completed successfully!\n");
@@ -259,7 +262,7 @@ int main()
 	if (rand_fd < 0) {
 		printf("ERROR: could not open /dev/random: %d\n", rand_fd);
 		res = EXIT_FAILURE;
-		goto close_syscall_dev;
+		goto cleanup;
 	}
 
 	char *rand = malloc(page_size);
@@ -298,16 +301,26 @@ int main()
 		res = EXIT_FAILURE;
 		free(tcs);
 		free(rand);
-		goto close_syscall_dev;
+		goto cleanup;
 	}
 	free(tcs);
 	free(rand);
 	printf("== OK: memory write verification completed successfully!\n");
 
+cleanup:
+	// Clean up memory overlay.
+	printf("calling IOCTL_MEM_OVERLAY_CLEANUP_CMD\n");
+	struct mem_overlay_cleanup_req cleanup_req;
+	memcpy(cleanup_req.id, req.id, sizeof(unsigned char) * UUID_SIZE);
+	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req);
+	if (ret) {
+		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %d\n", ret);
+		res = EXIT_FAILURE;
+	}
 close_syscall_dev:
 	close(syscall_dev);
 free_elements:
-	free(_mmap.elements);
+	free(req.segments);
 unmap_overlay:
 	munmap(overlay_map, total_size);
 close_overlay:

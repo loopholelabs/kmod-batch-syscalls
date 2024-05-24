@@ -15,31 +15,35 @@
     along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include <linux/xarray.h>
+#ifndef BATCH_SYSCALLS_COMMON_H
+#define BATCH_SYSCALLS_COMMON_H
 
-#ifndef BATCH_SYSCALLS_MODULE_H
-#define BATCH_SYSCALLS_MODULE_H
+#define MAGIC 's'
+#define IOCTL_MEM_OVERLAY_REQ_CMD _IOWR(MAGIC, 1, struct mem_overlay_req *)
+#define IOCTL_MEM_OVERLAY_CLEANUP_CMD \
+	_IOWR(MAGIC, 2, struct mem_overlay_cleanup_req *)
 
-#define MAJOR_DEV 64
-#define DEVICE_ID "batch_syscalls"
+#ifndef UUID_SIZE
+#define UUID_SIZE 16
+#endif
 
-struct mem_overlay_segment {
-	unsigned long overlay_addr;
-	struct vm_area_struct *overlay_vma;
-
+struct mem_overlay_segment_req {
 	unsigned long start_pgoff;
 	unsigned long end_pgoff;
 };
 
-struct mem_overlay {
+struct mem_overlay_req {
 	unsigned char id[UUID_SIZE];
 
 	unsigned long base_addr;
-	struct vm_area_struct *base_vma;
+	unsigned long overlay_addr;
 
-	struct xarray segments;
-
-	struct vm_operations_struct *hijacked_vm_ops;
+	unsigned int segments_size;
+	struct mem_overlay_segment_req *segments;
 };
 
-#endif //BATCH_SYSCALLS_MODULE_H
+struct mem_overlay_cleanup_req {
+	unsigned char id[UUID_SIZE];
+};
+
+#endif //BATCH_SYSCALLS_COMMON_H
