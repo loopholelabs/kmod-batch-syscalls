@@ -41,9 +41,16 @@ The following log levels are available.
 `tests/page_fault/page_fault.c` contains a sample userspace C program that
 illustrates how the module can be used.
 
-After loading the module the test program can be built and executed using the
-following command.
+The test program maps randomized test files into memory. These files can be
+created using the helper Go code that can be executed with the following
+command (requires Go to be installed).
 
+```bash
+make test-generate
+```
+
+After loading the module and generating the test data, the test program can be
+built and executed using the following command.
 
 ```bash
 make tests
