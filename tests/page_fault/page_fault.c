@@ -39,6 +39,9 @@ struct test_case {
 
 size_t page_size, total_size;
 
+char base_file[] = "base.bin";
+char overlay_file[] = "overlay.bin";
+
 bool verify_test_cases(struct test_case *tcs, int tcs_nr, int base_fd,
 		       char *base_map)
 {
@@ -99,7 +102,7 @@ int main()
 	       total_size);
 
 	// Read base.bin test file and mmap it into memory.
-	int base_fd = open("base.bin", O_RDONLY);
+	int base_fd = open(base_file, O_RDONLY);
 	if (base_fd < 0) {
 		printf("ERROR: could not open base file: %d\n", base_fd);
 		return EXIT_FAILURE;
@@ -134,17 +137,16 @@ int main()
 		goto unmap_base;
 	}
 
-	printf("mmap(\"base.bin\") took %lins (%lims)\n",
+	printf("mmap(\"%s\") took %lins (%lims)\n", base_file,
 	       after.tv_nsec - before.tv_nsec,
 	       (after.tv_nsec - before.tv_nsec) / 1000000);
 
 	// Read overlay test file and create memory overlay request.
-	char overlay_file[] = "overlay1.bin";
 	int overlay_fd = open(overlay_file, O_RDONLY);
 	if (overlay_fd < 0) {
 		printf("ERROR: could not open overlay file: %d\n", overlay_fd);
 		res = EXIT_FAILURE;
-		goto close_overlay;
+		goto unmap_base;
 	}
 
 	char *overlay_map =
@@ -321,7 +323,6 @@ close_syscall_dev:
 	close(syscall_dev);
 free_elements:
 	free(req.segments);
-unmap_overlay:
 	munmap(overlay_map, total_size);
 close_overlay:
 	close(overlay_fd);

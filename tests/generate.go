@@ -26,14 +26,37 @@ import (
 
 func main() {
 	pageSize := os.Getpagesize()
-	totalSize := pageSize * 1024 // * 1024
+	smallSize := pageSize * 1024
+	xlSize := smallSize * 1024
 
-	fmt.Printf("using page size %d bytes with total size %d bytes (%d mB)\n", pageSize, totalSize, totalSize/1024/1024)
+	fmt.Printf("using page size %d bytes with small size %d bytes (%d mB) and XL size %d bytes (%d mB)\n",
+		pageSize, smallSize, smallSize/1024/1024, xlSize, xlSize/1024/1024)
 
-	fmt.Printf("creating 'base.bin'\n")
+	files := []struct {
+		name string
+		size int
+	}{
+		{
+			name: "base.bin",
+			size: smallSize,
+		},
+		{
+			name: "baseXL.bin",
+			size: xlSize,
+		},
+		{
+			name: "overlay.bin",
+			size: smallSize,
+		},
+		{
+			name: "overlayXL.bin",
+			size: xlSize,
+		},
+	}
 
-	{
-		out, err := os.OpenFile("base.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
+	for _, f := range files {
+		fmt.Printf("creating '%s'\n", f.name)
+		out, err := os.OpenFile(f.name, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
 		if err != nil {
 			panic(err)
 		}
@@ -45,55 +68,14 @@ func main() {
 		}
 		defer in.Close()
 
-		if _, err := io.CopyN(out, in, int64(totalSize)); err != nil {
+		if _, err := io.CopyN(out, in, int64(f.size)); err != nil {
 			panic(err)
 		}
 	}
 
-	fmt.Printf("creating 'overlay1.bin'\n")
-
+	fmt.Println("creating 'overlayZebra.bin'")
 	{
-		out, err := os.OpenFile("overlay1.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
-		if err != nil {
-			panic(err)
-		}
-		defer out.Close()
-
-		in, err := os.Open("/dev/random")
-		if err != nil {
-			panic(err)
-		}
-		defer in.Close()
-
-		if _, err := io.CopyN(out, in, int64(totalSize)); err != nil {
-			panic(err)
-		}
-	}
-
-	fmt.Printf("creating 'overlay2.bin'\n")
-
-	{
-		out, err := os.OpenFile("overlay2.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
-		if err != nil {
-			panic(err)
-		}
-		defer out.Close()
-
-		in, err := os.Open("/dev/random")
-		if err != nil {
-			panic(err)
-		}
-		defer in.Close()
-
-		if _, err := io.CopyN(out, in, int64(totalSize)); err != nil {
-			panic(err)
-		}
-	}
-
-	fmt.Println("creating 'overlay3.bin'")
-
-	{
-		out, err := os.OpenFile("overlay3.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
+		out, err := os.OpenFile("overlayZebra.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
 		if err != nil {
 			panic(err)
 		}
@@ -110,7 +92,7 @@ func main() {
 			zeros[i] = zero
 		}
 
-		for i := 0; i < totalSize/bufferSize; i++ {
+		for i := 0; i < smallSize/bufferSize; i++ {
 			if i%2 == 0 {
 				err = binary.Write(out, binary.LittleEndian, zeros)
 				if err != nil {
