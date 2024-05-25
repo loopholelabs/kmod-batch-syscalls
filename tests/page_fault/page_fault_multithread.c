@@ -31,8 +31,8 @@ const static int nr_threads = 10;
 size_t page_size, total_size;
 char *base_mmap;
 
-char base_file[] = "baseXL.bin";
-char overlay_file[] = "overlayXL.bin";
+char base_file[] = "base.bin";
+char overlay_file[] = "overlay.bin";
 
 void *page_fault()
 {
@@ -82,7 +82,7 @@ int main()
 {
 	int res = EXIT_SUCCESS;
 	page_size = sysconf(_SC_PAGESIZE);
-	total_size = page_size * 1024 * 1024;
+	total_size = page_size * 1024;
 	pthread_t tid[nr_threads];
 
 	int base_fd = open(base_file, O_RDONLY);

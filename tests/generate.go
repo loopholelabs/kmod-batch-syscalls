@@ -40,18 +40,18 @@ func main() {
 			name: "base.bin",
 			size: smallSize,
 		},
-		{
-			name: "baseXL.bin",
-			size: xlSize,
-		},
+		//{
+		//	name: "baseXL.bin",
+		//	size: xlSize,
+		//},
 		{
 			name: "overlay.bin",
 			size: smallSize,
 		},
-		{
-			name: "overlayXL.bin",
-			size: xlSize,
-		},
+		//{
+		//	name: "overlayXL.bin",
+		//	size: xlSize,
+		//},
 	}
 
 	for _, f := range files {
@@ -73,9 +73,9 @@ func main() {
 		}
 	}
 
-	fmt.Println("creating 'overlayZebra.bin'")
+	fmt.Println("creating 'overlay_zebra.bin'")
 	{
-		out, err := os.OpenFile("overlayZebra.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
+		out, err := os.OpenFile("overlay_zebra.bin", os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
 		if err != nil {
 			panic(err)
 		}
