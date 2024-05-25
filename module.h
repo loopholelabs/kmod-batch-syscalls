@@ -33,10 +33,10 @@ struct mem_overlay_segment {
 
 struct mem_overlay {
 	unsigned char id[UUID_SIZE];
-	spinlock_t lock;
 
 	unsigned long base_addr;
 	struct vm_area_struct *base_vma;
+	rwlock_t vma_file_lock;
 
 	struct xarray segments;
 
