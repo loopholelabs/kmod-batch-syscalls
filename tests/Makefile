@@ -16,6 +16,12 @@ page_fault_multithread:
 	gcc ${CFLAGS} page_fault/page_fault_multithread.c -I../ -o page_fault_multithread.out
 	sudo ./page_fault_multithread.out
 
+.PHONY: page_fault_benchmark
+page_fault_benchmark:
+	sudo sysctl -w vm.max_map_count=8388608
+	gcc ${CFLAGS} page_fault/page_fault_benchmark.c -I../ -o page_fault_benchmark.out
+	sudo ./page_fault_benchmark.out
+
 .PHONY: page_fault_userspace
 page_fault_userspace:
 	sudo sysctl -w vm.max_map_count=8388608

@@ -29,6 +29,10 @@ unload:
 tests:
 	cd tests && ((${MAKE} all && exit 0) || exit -1)
 
+.PHONY: tests-benchmark
+tests-benchmark:
+	cd tests && ((${MAKE} page_fault_benchmark && exit 0) || exit -1)
+
 .PHONY: tests-userspace
 tests-userspace:
 	cd tests && ((${MAKE} userspace && exit 0) || exit -1)

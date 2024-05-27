@@ -40,18 +40,26 @@ func main() {
 			name: "base.bin",
 			size: smallSize,
 		},
-		//{
-		//	name: "baseXL.bin",
-		//	size: xlSize,
-		//},
+		{
+			name: "base2.bin",
+			size: smallSize,
+		},
 		{
 			name: "overlay.bin",
 			size: smallSize,
 		},
-		//{
-		//	name: "overlayXL.bin",
-		//	size: xlSize,
-		//},
+		{
+			name: "baseXL.bin",
+			size: xlSize,
+		},
+		{
+			name: "baseXL2.bin",
+			size: xlSize,
+		},
+		{
+			name: "overlayXL.bin",
+			size: xlSize,
+		},
 	}
 
 	for _, f := range files {
