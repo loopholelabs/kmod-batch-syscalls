@@ -15,6 +15,7 @@
     along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,31 +28,38 @@
 
 #include "../../common.h"
 
-const static int nr_threads = 10;
+const static int nr_threads = 200;
 size_t page_size, total_size;
 char *base_mmap;
 
 char base_file[] = "base.bin";
 char overlay_file[] = "overlay.bin";
 
-void *page_fault()
+void *page_fault(void *idx)
 {
-	printf("verifying base memory\n");
+	int ret = EXIT_SUCCESS;
+	printf("[%03ld] verifying base memory\n", (long)idx);
 
 	char *buffer = malloc(page_size);
 	memset(buffer, 0, page_size);
 
 	int base_fd = open(base_file, O_RDONLY);
 	if (base_fd < 0) {
-		printf("ERROR: could not open base file: %d\n", base_fd);
+		printf("[%03ld] ERROR: could not open base file: %s\n",
+		       (long)idx, strerror(errno));
+		ret = EXIT_FAILURE;
 		goto out;
 	}
+	printf("[%03ld] opened base file %s\n", (long)idx, base_file);
 
 	int overlay_fd = open(overlay_file, O_RDONLY);
 	if (overlay_fd < 0) {
-		printf("ERROR: could not open overlay file: %d\n", overlay_fd);
+		printf("[%03ld] ERROR: could not open overlay file: %s\n",
+		       (long)idx, strerror(errno));
+		ret = EXIT_FAILURE;
 		goto out;
 	}
+	printf("[%03ld] opened overlay file %s\n", (long)idx, overlay_file);
 
 	int fd;
 	for (unsigned long pgoff = 0; pgoff < total_size / page_size; pgoff++) {
@@ -65,17 +73,18 @@ void *page_fault()
 		read(fd, buffer, page_size);
 
 		if (memcmp(base_mmap + offset, buffer, page_size)) {
-			printf("== ERROR: base memory does not match the file contents at page %lu\n",
-			       pgoff);
+			printf("== [%03ld] ERROR: base memory does not match the file contents at page %lu\n",
+			       (long)idx, pgoff);
+			ret = EXIT_FAILURE;
 			goto out;
 		}
 		memset(buffer, 0, page_size);
 	}
-	printf("== OK: base memory verification complete\n");
+	printf("== [%03ld] OK: base memory verification complete\n", (long)idx);
 
 out:
 	free(buffer);
-	return NULL;
+	return (void *)(long)ret;
 }
 
 int main()
@@ -92,8 +101,7 @@ int main()
 	}
 	printf("base file %s opened\n", base_file);
 
-	base_mmap = mmap(NULL, total_size, PROT_READ | PROT_WRITE, MAP_PRIVATE,
-			 base_fd, 0);
+	base_mmap = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
 	if (base_mmap == MAP_FAILED) {
 		printf("ERROR: could not mmap base file\n");
 		res = EXIT_FAILURE;
@@ -151,12 +159,22 @@ int main()
 	}
 	printf("called IOCTL_MEM_OVERLAY_REQ_CMD\n");
 
-	for (int i = 0; i < nr_threads; i++) {
-		pthread_create(&tid[i], NULL, page_fault, NULL);
+	for (long i = 0; i < nr_threads; i++) {
+		pthread_create(&tid[i], NULL, page_fault, (void *)i);
 	}
 
+	int success = 0, fail = 0;
 	for (int i = 0; i < nr_threads; i++) {
-		pthread_join(tid[i], NULL);
+		void *res;
+		pthread_join(tid[i], &res);
+		switch ((long)res) {
+		case EXIT_SUCCESS:
+			success += 1;
+			break;
+		default:
+			fail += 1;
+			break;
+		}
 	}
 
 	struct mem_overlay_cleanup_req cleanup_req;
@@ -170,16 +188,24 @@ int main()
 
 close_syscall_dev:
 	close(syscall_dev);
+	printf("closed device driver\n");
 free_elements:
 	free(req.segments);
+	printf("freed segments\n");
 	munmap(overlay_map, total_size);
+	printf("unmapped overlay\n");
 close_overlay:
 	close(overlay_fd);
+	printf("closed overlay\n");
 unmap_base:
 	munmap(base_mmap, total_size);
+	printf("unmapped base\n");
 close_base:
 	close(base_fd);
+	printf("closed base\n");
 
-	printf("done\n");
+	printf("done success=%d fail=%d\n", success, fail);
+	if (fail > 0)
+		res = EXIT_FAILURE;
 	return res;
 }
