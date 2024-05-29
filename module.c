@@ -73,8 +73,9 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 		return VM_FAULT_SIGBUS;
 	}
 
-	XA_STATE(xas, &mem_overlay->segments, start_pgoff);
+	spin_lock(&mem_overlay->vma_file_lock);
 
+	XA_STATE(xas, &mem_overlay->segments, start_pgoff);
 	struct file *base_vm_file = vmf->vma->vm_file;
 	struct mem_overlay_segment *seg;
 	vm_fault_t ret;
@@ -94,9 +95,7 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 				"handling base page fault start=%lu end=%lu uuid=%pUB",
 				start, end, id);
 
-			read_lock(&mem_overlay->vma_file_lock);
 			ret = filemap_map_pages(vmf, start, end);
-			read_unlock(&mem_overlay->vma_file_lock);
 			break;
 		}
 
@@ -107,9 +106,7 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 				"handling base page fault start=%lu end=%lu uuid=%pUB",
 				start, end, id);
 
-			read_lock(&mem_overlay->vma_file_lock);
 			ret = filemap_map_pages(vmf, start, end);
-			read_unlock(&mem_overlay->vma_file_lock);
 			if (ret & VM_FAULT_ERROR)
 				break;
 		}
@@ -124,15 +121,14 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 		// TODO: acquire write lock on vmf->vma->vm_mm.
 		// A read lock may have already been acquired.
 		// https://docs.kernel.org/filesystems/locking.html#vm-operations-struct
-		write_lock(&mem_overlay->vma_file_lock);
 		vmf->vma->vm_file = seg->overlay_vma->vm_file;
 		ret = filemap_map_pages(vmf, start, end);
 		vmf->vma->vm_file = base_vm_file;
-		write_unlock(&mem_overlay->vma_file_lock);
 		if (ret & VM_FAULT_ERROR)
 			break;
 	}
 	rcu_read_unlock();
+	spin_unlock(&mem_overlay->vma_file_lock);
 	return ret;
 }
 
@@ -205,7 +201,7 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 	}
 
 	mem_overlay->base_addr = req.base_addr;
-	rwlock_init(&mem_overlay->vma_file_lock);
+	spin_lock_init(&mem_overlay->vma_file_lock);
 	xa_init(&(mem_overlay->segments));
 
 	struct mem_overlay_segment *seg;
