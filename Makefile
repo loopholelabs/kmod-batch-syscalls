@@ -44,3 +44,7 @@ tests-generate:
 .PHONY: tests-clean
 tests-clean:
 	cd tests && ((${MAKE} clean && exit 0) || exit -1)
+
+.PHONY: tests-binaries
+tests-binaries:
+	cd tests && ((${MAKE} binaries && exit 0) || exit -1)
