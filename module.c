@@ -55,6 +55,11 @@ static void cleanup_mem_overlay_segments(struct xarray segments)
 static void cleanup_mem_overlay(void *data)
 {
 	struct mem_overlay *mem_overlay = (struct mem_overlay *)data;
+
+	// Revert base VMA vm_ops to its original value in case the VMA is used
+	// after cleanup (usually to call ->close() on unmap).
+	mem_overlay->base_vma->vm_ops = mem_overlay->original_vm_ops;
+
 	kvfree(mem_overlay->hijacked_vm_ops);
 	cleanup_mem_overlay_segments(mem_overlay->segments);
 	kvfree(mem_overlay);
@@ -257,6 +262,10 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		res = -ENOMEM;
 		goto cleanup_segments;
 	}
+
+	// Store base VMA and original vm_ops so we can restore it on cleanup.
+	mem_overlay->base_vma = base_vma;
+	mem_overlay->original_vm_ops = base_vma->vm_ops;
 
 	memcpy(mem_overlay->hijacked_vm_ops, base_vma->vm_ops,
 	       sizeof(struct vm_operations_struct));

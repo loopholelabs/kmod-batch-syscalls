@@ -40,6 +40,7 @@ struct mem_overlay {
 
 	struct xarray segments;
 
+	const struct vm_operations_struct *original_vm_ops;
 	struct vm_operations_struct *hijacked_vm_ops;
 };
 
