@@ -12,3 +12,4 @@
 .run
 *.img
 *.bin
+.fuse_hidden*

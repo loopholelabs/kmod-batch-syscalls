@@ -228,8 +228,8 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		seg->overlay_addr = req.overlay_addr;
 		seg->overlay_vma = overlay_vma;
 
-		log_info("inserting segment to overlay start=%lu end=%lu",
-			 start, end);
+		log_debug("inserting segment to overlay start=%lu end=%lu",
+			  start, end);
 		xa_store_range(&mem_overlay->segments, start, end, seg,
 			       GFP_KERNEL);
 	}
