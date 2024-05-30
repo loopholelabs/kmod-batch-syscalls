@@ -59,10 +59,10 @@ static void cleanup_mem_overlay(void *data)
 	// Revert base VMA vm_ops to its original value in case the VMA is used
 	// after cleanup (usually to call ->close() on unmap).
 	// TODO: support per-VMA locking (https://lwn.net/Articles/937943/).
-	mmap_write_lock(current->mm);
+	mmap_write_lock(mem_overlay->base_vma->vm_mm);
 	mem_overlay->base_vma->vm_ops = mem_overlay->original_vm_ops;
 	kvfree(mem_overlay->hijacked_vm_ops);
-	mmap_write_unlock(current->mm);
+	mmap_write_unlock(mem_overlay->base_vma->vm_mm);
 
 	cleanup_mem_overlay_segments(mem_overlay->segments);
 	kvfree(mem_overlay);
