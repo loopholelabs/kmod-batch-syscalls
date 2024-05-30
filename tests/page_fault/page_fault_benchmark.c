@@ -15,6 +15,7 @@
     along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,7 +47,8 @@ bool verify_test_cases(int overlay_fd, int base_fd, char *base_map)
 
 	struct timespec before, after;
 	if (clock_gettime(CLOCK_MONOTONIC, &before) < 0) {
-		printf("ERROR: could not measure 'before' time for base mmap\n");
+		printf("ERROR: could not measure 'before' time for base mmap: %s\n",
+		       strerror(errno));
 		valid = false;
 		goto out;
 	}
@@ -74,7 +76,8 @@ bool verify_test_cases(int overlay_fd, int base_fd, char *base_map)
 	}
 
 	if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
-		printf("ERROR: could not measure 'after' time for base mmap\n");
+		printf("ERROR: could not measure 'after' time for base mmap: %s\n",
+		       strerror(errno));
 		valid = false;
 		goto out;
 	}
@@ -106,14 +109,15 @@ int main()
 	// Read base.bin test file and mmap it into memory.
 	int base_fd = open(base_file, O_RDONLY);
 	if (base_fd < 0) {
-		printf("ERROR: could not open base file: %d\n", base_fd);
+		printf("ERROR: could not open base file %s: %s\n", base_file,
+		       strerror(errno));
 		return EXIT_FAILURE;
 	}
 
 	int clean_base_fd = open(clean_base_file, O_RDONLY);
 	if (clean_base_fd < 0) {
-		printf("ERROR: could not open clean base file: %d\n",
-		       clean_base_fd);
+		printf("ERROR: could not open clean base file %s: %s\n",
+		       clean_base_file, strerror(errno));
 		close(base_fd);
 		return EXIT_FAILURE;
 	}
@@ -121,7 +125,8 @@ int main()
 	char *base_mmap = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
 			       MAP_PRIVATE, base_fd, 0);
 	if (base_mmap == MAP_FAILED) {
-		printf("ERROR: could not mmap base file\n");
+		printf("ERROR: could not mmap base file %s: %s\n", base_file,
+		       strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_base;
 	}
@@ -129,7 +134,8 @@ int main()
 	char *clean_base_mmap = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE,
 				     clean_base_fd, 0);
 	if (clean_base_mmap == MAP_FAILED) {
-		printf("ERROR: could not mmap second base file\n");
+		printf("ERROR: could not mmap second base file %s: %s\n",
+		       clean_base_file, strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_base;
 	}
@@ -137,7 +143,8 @@ int main()
 	// Read overlay test file and create memory overlay request.
 	int overlay_fd = open(overlay_file, O_RDONLY);
 	if (overlay_fd < 0) {
-		printf("ERROR: could not open overlay file: %d\n", overlay_fd);
+		printf("ERROR: could not open overlay file %s: %s\n",
+		       overlay_file, strerror(errno));
 		res = EXIT_FAILURE;
 		goto unmap_base;
 	}
@@ -145,7 +152,8 @@ int main()
 	char *overlay_map =
 		mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, overlay_fd, 0);
 	if (overlay_map == MAP_FAILED) {
-		printf("ERROR: could not mmap overlay file\n");
+		printf("ERROR: could not mmap overlay file %s: %s\n",
+		       overlay_file, strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_overlay;
 	}
@@ -171,8 +179,8 @@ int main()
 	// Call kernel module with ioctl call to the character device.
 	int syscall_dev = open("/dev/batch_syscalls", O_WRONLY);
 	if (syscall_dev < 0) {
-		printf("ERROR: could not open /dev/batch_syscalls: %d\n",
-		       syscall_dev);
+		printf("ERROR: could not open /dev/batch_syscalls: %s\n",
+		       strerror(errno));
 		res = EXIT_FAILURE;
 		goto free_elements;
 	}
@@ -180,13 +188,14 @@ int main()
 	int ret;
 	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
 	if (ret) {
-		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %d\n", ret);
+		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n",
+		       strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_syscall_dev;
 	}
 
 	printf("= TEST: checking memory contents with overlay\n");
-	if (!verify_test_cases(-1, base_fd, base_mmap)) {
+	if (!verify_test_cases(overlay_fd, base_fd, base_mmap)) {
 		res = EXIT_FAILURE;
 		goto cleanup;
 	}
@@ -206,7 +215,8 @@ cleanup:
 	memcpy(cleanup_req.id, req.id, sizeof(unsigned char) * UUID_SIZE);
 	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req);
 	if (ret) {
-		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %d\n", ret);
+		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n",
+		       strerror(errno));
 		res = EXIT_FAILURE;
 	}
 close_syscall_dev:

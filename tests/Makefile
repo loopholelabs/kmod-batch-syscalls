@@ -1,4 +1,4 @@
-all: page_fault
+all: page_fault page_fault_multithread page_fault_fork
 
 ifdef VERIFY
     CFLAGS += -DVERIFY
