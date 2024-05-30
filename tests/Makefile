@@ -8,7 +8,7 @@ endif
 	gcc ${CFLAGS} $< -I../ -o $@
 
 .PHONY: binaries
-binaries: page_fault.out page_fault_multithread.out page_fault_benchmark.out page_fault_fork.out
+binaries: page_fault.out page_fault_multithread.out page_fault_multithread_ioctl.out page_fault_benchmark.out page_fault_fork.out
 
 .PHONY: page_fault
 page_fault: page_fault.out

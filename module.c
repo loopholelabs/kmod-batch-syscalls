@@ -58,9 +58,12 @@ static void cleanup_mem_overlay(void *data)
 
 	// Revert base VMA vm_ops to its original value in case the VMA is used
 	// after cleanup (usually to call ->close() on unmap).
+	// TODO: support per-VMA locking (https://lwn.net/Articles/937943/).
+	mmap_write_lock(current->mm);
 	mem_overlay->base_vma->vm_ops = mem_overlay->original_vm_ops;
-
 	kvfree(mem_overlay->hijacked_vm_ops);
+	mmap_write_unlock(current->mm);
+
 	cleanup_mem_overlay_segments(mem_overlay->segments);
 	kvfree(mem_overlay);
 }
@@ -166,12 +169,41 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		return -EFAULT;
 	}
 
+	// Acquire mm write lock since we expect to mutate the base VMA.
+	// TODO: support per-VMA locking (https://lwn.net/Articles/937943/).
+	mmap_write_lock(current->mm);
+
+	// Find overlay VMA to store it into each segment.
+	struct vm_area_struct *overlay_vma =
+		find_vma(current->mm, req.overlay_addr);
+	if (overlay_vma == NULL || overlay_vma->vm_start > req.overlay_addr) {
+		log_error("failed to find overlay VMA");
+		res = -EFAULT;
+		goto out;
+	}
+
+	// Find base VMA and validate we can use it.
+	struct vm_area_struct *base_vma = find_vma(current->mm, req.base_addr);
+	if (base_vma == NULL || base_vma->vm_start > req.base_addr) {
+		log_error("failed to find base VMA");
+		res = -EFAULT;
+		goto out;
+	}
+
+	if (base_vma->vm_private_data != NULL) {
+		log_crit("base VMA private data already set");
+		res = -EFAULT;
+		goto out;
+	}
+
+	// Read overlay segments from request.
 	struct mem_overlay_segment_req *segs =
 		kvzalloc(sizeof(struct mem_overlay_segment) * req.segments_size,
 			 GFP_KERNEL);
 	if (!segs) {
 		log_error("failed to allocate segments");
-		return -ENOMEM;
+		res = -ENOMEM;
+		goto out;
 	}
 	ret = copy_from_user(segs, req.segments,
 			     sizeof(struct mem_overlay_segment_req) *
@@ -187,14 +219,6 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 	log_debug(
 		"received memory overlay request base_addr=%lu overlay_addr=%lu",
 		req.base_addr, req.overlay_addr);
-
-	// Find overlay VMA to store it into each segment.
-	struct vm_area_struct *overlay_vma =
-		find_vma(current->mm, req.overlay_addr);
-	if (overlay_vma == NULL || overlay_vma->vm_start > req.overlay_addr) {
-		log_error("failed to find overlay VMA");
-		goto free_segs;
-	}
 
 	// Create new memory overlay instance.
 	struct mem_overlay *mem_overlay =
@@ -247,13 +271,6 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 	}
 
 	// Hijack page fault handler for base VMA.
-	struct vm_area_struct *base_vma = find_vma(current->mm, req.base_addr);
-	if (base_vma == NULL || base_vma->vm_start > req.base_addr) {
-		log_error("failed to find base VMA");
-		res = -EFAULT;
-		goto cleanup_segments;
-	}
-
 	log_info("hijacking vm_ops for base VMA addr=0x%lu", req.base_addr);
 	mem_overlay->hijacked_vm_ops =
 		kvzalloc(sizeof(struct vm_operations_struct), GFP_KERNEL);
@@ -275,12 +292,6 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 
 	// Store memory overlay ID on base VMA private data so we can retrieve it
 	// when handling a page fault.
-	if (base_vma->vm_private_data != NULL) {
-		// TODO: figure out how to handle this case.
-		log_crit("failed to handle base VMA, private data already set");
-		res = -EFAULT;
-		goto free_vm_ops;
-	}
 	base_vma->vm_private_data = mem_overlay->id;
 
 	// Save memory overlay into hashtable.
@@ -289,21 +300,24 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		log_error("failed to insert memory overlay into hashtable: %d",
 			  iret);
 		res = -EFAULT;
-		goto free_vm_ops;
+		goto revert_vm_ops;
 	}
+
 	log_info("memory overlay created successfully uuid=%pUB",
 		 mem_overlay->id);
 	goto out;
 
-free_vm_ops:
+revert_vm_ops:
+	base_vma->vm_ops = mem_overlay->original_vm_ops;
+	mmap_write_unlock(current->mm);
 	kvfree(mem_overlay->hijacked_vm_ops);
 cleanup_segments:
 	cleanup_mem_overlay_segments(mem_overlay->segments);
 	kvfree(mem_overlay);
 free_segs:
 	kvfree(segs);
-
 out:
+	mmap_write_unlock(current->mm);
 	return res;
 }
 
