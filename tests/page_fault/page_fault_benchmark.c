@@ -182,7 +182,7 @@ int main()
 		printf("ERROR: could not open %s: %s\n", kmod_device_path,
 		       strerror(errno));
 		res = EXIT_FAILURE;
-		goto free_elements;
+		goto free_segments;
 	}
 
 	int ret;
@@ -222,7 +222,7 @@ cleanup:
 	}
 close_syscall_dev:
 	close(syscall_dev);
-free_elements:
+free_segments:
 	free(req.segments);
 	munmap(overlay_map, total_size);
 close_overlay:

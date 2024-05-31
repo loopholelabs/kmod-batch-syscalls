@@ -147,7 +147,7 @@ int main()
 		printf("ERROR: could not open %s: %d\n", kmod_device_path,
 		       syscall_dev);
 		res = EXIT_FAILURE;
-		goto free_elements;
+		goto free_segments;
 	}
 	printf("opened %s device\n", kmod_device_path);
 
@@ -202,7 +202,7 @@ cleanup:;
 close_syscall_dev:
 	close(syscall_dev);
 	printf("closed device driver\n");
-free_elements:
+free_segments:
 	free(req.segments);
 	printf("freed segments\n");
 	munmap(overlay_map, total_size);

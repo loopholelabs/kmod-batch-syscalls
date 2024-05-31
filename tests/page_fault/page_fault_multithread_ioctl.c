@@ -225,7 +225,7 @@ int main()
 		printf("== ERROR: expected one thread to succeed in calling IOCTL_MEM_OVERLAY_REQ_CMD, got %d\n",
 		       success);
 		res = EXIT_FAILURE;
-		goto free_elements;
+		goto free_segments;
 	}
 	printf("== OK: calls to IOCTL_MEM_OVERLAY_REQ_CMD completed successfully! success=%d fail=%d\n",
 	       success, fail);
@@ -257,12 +257,12 @@ int main()
 		printf("ERROR: expected one thread to succeed in calling IOCTL_MEM_OVERLAY_CLEANUP_CMD success=%d fail=%d\n",
 		       success, fail);
 		res = EXIT_FAILURE;
-		goto free_elements;
+		goto free_segments;
 	}
 	printf("== OK: calls to IOCTL_MEM_OVERLAY_CLEANUP_CMD completed successfully! success=%d fail=%d\n",
 	       success, fail);
 
-free_elements:
+free_segments:
 	free(req.segments);
 	printf("freed segments\n");
 	munmap(overlay_map, total_size);

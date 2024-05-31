@@ -161,7 +161,7 @@ int main()
 		printf("ERROR: could not open %s: %d\n", kmod_device_path,
 		       syscall_dev);
 		res = EXIT_FAILURE;
-		goto free_elements;
+		goto free_segments;
 	}
 
 	printf("= TEST: verify IOCTL_MEM_OVERLAY_REQ_CMD succeeds\n");
@@ -212,7 +212,7 @@ int main()
 close_syscall_dev:
 	close(syscall_dev);
 	printf("closed device driver\n");
-free_elements:
+free_segments:
 	free(req.segments);
 	munmap(overlay_map, total_size);
 	printf("unmapped overlay file\n");
