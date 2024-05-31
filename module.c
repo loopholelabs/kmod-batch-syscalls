@@ -344,7 +344,7 @@ static long int unlocked_ioctl_handle_mem_overlay_cleanup_req(unsigned long arg)
 		hashtable_delete(mem_overlays, req.id);
 	if (!mem_overlay) {
 		log_error("failed to cleanup memory overlay id=%lu", req.id);
-		return -EFAULT;
+		return -ENOENT;
 	}
 
 	struct mm_struct *mm = mem_overlay->base_vma->vm_mm;

@@ -1,4 +1,10 @@
-all: page_fault page_fault_multithread page_fault_fork
+tests = page_fault \
+				page_fault_multithread \
+				page_fault_multithread_ioctl \
+				page_fault_benchmark.out page_fault_fork \
+				page_fault_ioctl_error
+
+all: $(tests)
 
 ifdef VERIFY
     CFLAGS += -DVERIFY
@@ -8,7 +14,7 @@ endif
 	gcc ${CFLAGS} $< -I../ -o $@
 
 .PHONY: binaries
-binaries: page_fault.out page_fault_multithread.out page_fault_multithread_ioctl.out page_fault_benchmark.out page_fault_fork.out
+binaries: $(addsuffix .out,$(tests))
 
 .PHONY: page_fault
 page_fault: page_fault.out
