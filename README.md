@@ -13,18 +13,19 @@
 
 ## Build and Load
 
-The kernel module requires Linux kernel v6.5+. Building the Kernel Module can
-be done using the following command.
+The kernel module requires Linux kernel v6.5+. Use the following command to
+build the kernel module.
 
 ```bash
 make module
 ```
 
-The `memory-overlay.ko` file will automatically be generated. It can then
-be loaded using `sudo make load` and unloaded using `sudo make unload`.
+This command generates a file called `memory-overlay.ko` that you can load into
+the kernel using the command `sudo make load` and unload using `sudo make
+unload`.
 
-It is possible to use the `LOG_LEVEL` variable to change the kernel module log
-level on build.
+Set the `LOG_LEVEL` variable when building the kernel module to change log
+verbosity.
 
 ```bash
 make module LOG_LEVEL=2
@@ -36,28 +37,150 @@ The following log levels are available.
 * `LOG_LEVEL=2`: `DEBUG`.
 * `LOG_LEVEL=3`: `TRACE`.
 
-## Testing and Example
+## Testing and Examples
 
-`tests/page_fault/page_fault.c` contains a sample userspace C program that
-illustrates how the module can be used.
+The folder `tests/page_fault` contains several userspace C programs that can be
+used to test the kernel module and as examples on how to use it.
 
-The test program maps randomized test files into memory. These files can be
-created using the helper Go code that can be executed with the following
-command (requires Go to be installed).
+The test programs map randomized test files into memory. You can generate them
+using the `test/generate.go` helper. This program requires the Go toolchain to
+be installed. You can execute the helper with the following command.
 
 ```bash
-make test-generate
+make tests-generate
 ```
 
-After loading the module and generating the test data, the test program can be
-built and executed using the following command.
+After loading the module and generating the test data, you can build and
+execute the test programs using the following command.
 
 ```bash
 make tests
 ```
 
-The kernel module output can be retrieved using the `sudo dmesg` command or
-`sudo dmesg -w` to keep watching the log output.
+You can retrieve the kernel module output using the `sudo dmesg` command, or
+run `sudo dmesg -w` in another window to actively follow the latest log output.
+
+## Device Driver API
+
+The kernel module creates a character device driver that is available in the
+path `/dev/memory_overlay`. You can interact with the kernel module by sending
+[`ioctl`][man_ioctl] commands to this device.
+
+```c
+int syscall_dev = open("/dev/memory_overlay", O_WRONLY);
+if (syscall_dev < 0) {
+	printf("ERROR: failed to open /dev/memory_overlay: %s\n", strerror(errno));
+	return EXIT_FAILURE;
+}
+
+struct mem_overlay_req req;
+// ...generate request...
+
+int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
+if (ret) {
+	printf("ERROR: failed not call 'IOCTL_MMAP_CMD': %s\n", strerror(errno));
+  close(syscall_dev);
+  return EXIT_FAILURE;
+}
+```
+
+The device driver uses the following commands, which are defined in the
+`commong.h` file.
+
+### `IOCTL_MEM_OVERLAY_REQ_CMD`
+
+The `IOCTL_MEM_OVERLAY_REQ_CMD` takes a `mem_overlay_req` as input and is used
+to register a new set of memory overlays for a base memory area.
+
+Each base memory can only be registered once.
+
+```c
+struct mem_overlay_segment_req {
+	unsigned long start_pgoff;
+	unsigned long end_pgoff;
+};
+
+struct mem_overlay_req {
+	unsigned long id;
+
+	unsigned long base_addr;
+	unsigned long overlay_addr;
+
+	unsigned int segments_size;
+	struct mem_overlay_segment_req *segments;
+};
+```
+
+#### `mem_overlay_req` Fields
+
+* `id`: Request identifier. This value is set by the kernel module if the
+  command succeeds and should not be set when making the request.
+* `base_addr`: Virtual address where the base file is mapped in memory.
+* `overlay_addr`: Virtual address where the overlay file is mapped in memory.
+* `segments_size`: The number of memory segments to overlay.
+* `segments`: Array of memory segments to overlay.
+
+#### `mem_overlay_segment_req` Fields
+
+* `start_pgoff`: Page offset of where the segment start (inclusive).
+* `end_pgoff`: Page offset of where the segment ends (inclusive).
+
+#### Return Value
+
+On success, a zero is returned. On error, -1 is returned, and
+[`errno`][man_errno] is set to indicate the error.
+
+#### Errors
+
+* `EFAULT`: Internal module error. Refer to the kernel module logs for more
+  information.
+* `EINVAL`: Invalid base or overlay virtual memory address.
+* `EEXIST`: Base file is already registered.
+* `ENOMEM`: Failed to allocate memory.
+
+### `IOCTL_MEM_OVERLAY_CLEANUP_CMD`
+
+The `IOCTL_MEM_OVERLAY_CLEANUP_CMD` takes a `mem_overlay_cleanup_req` as input
+and is used to remove a previous memory overlay request from the kernel module.
+
+Every call to `IOCTL_MEM_OVERLAY_REQ_CMD` MUST be have a corresponding
+`IOCTL_MEM_OVERLAY_CLEANUP_CMD` before the program exits. Fail to do so may
+result kernel panics due to invalid memory pages left in the system.
+
+```c
+int syscall_dev = open("/dev/memory_overlay", O_WRONLY);
+if (syscall_dev < 0) {
+	printf("ERROR: failed to open /dev/memory_overlay: %s\n", strerror(errno));
+	return EXIT_FAILURE;
+}
+
+// ...register memory overlay...
+
+struct mem_overlay_cleanup_req cleanup_req = {
+	.id = req.id,
+};
+int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req);
+if (ret) {
+	printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n", strerror(errno));
+  close(syscall_dev);
+	return EXIT_FAILURE;
+}
+```
+
+#### `mem_overlay_cleanup_req` fields
+
+* `id`: Request identifier returned from a call to `IOCTL_MEM_OVERLAY_REQ_CMD`.
+
+#### Return value
+
+On success, a zero is returned. On error, -1 is returned, and
+[`errno`][man_errno] is set to indicate the error.
+
+#### Errors
+
+* `EFAULT`: Internal module error. Refer to the kernel module logs for more
+  information.
+* `ENOENT`: Request ID not found.
 
 ## Known Issues
 
@@ -163,3 +286,5 @@ Everyone interacting in this project’s codebases, issue trackers, chat rooms a
 [gitrepo]: https://github.com/loopholelabs/kmod-batch-syscalls
 [loopholelabs]: https://cdn.loopholelabs.io/loopholelabs/LoopholeLabsLogo.svg
 [loophomepage]: https://loopholelabs.io
+[man_errno]: https://man7.org/linux/man-pages/man3/errno.3.html
+[man_ioctl]: https://www.man7.org/linux/man-pages/man2/ioctl.2.html

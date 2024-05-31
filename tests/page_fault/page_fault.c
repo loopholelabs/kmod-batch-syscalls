@@ -195,7 +195,7 @@ int main()
 	int ret;
 	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
 	if (ret) {
-		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n",
+		printf("ERROR: could not call 'IOCTL_MEM_OVERLAY_REQ_CMD': %s\n",
 		       strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_syscall_dev;

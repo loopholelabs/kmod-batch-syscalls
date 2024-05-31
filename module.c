@@ -184,14 +184,14 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		find_vma(current->mm, req.overlay_addr);
 	if (overlay_vma == NULL || overlay_vma->vm_start > req.overlay_addr) {
 		log_error("failed to find overlay VMA");
-		res = -EFAULT;
+		res = -EINVAL;
 		goto out;
 	}
 
 	struct vm_area_struct *base_vma = find_vma(current->mm, req.base_addr);
 	if (base_vma == NULL || base_vma->vm_start > req.base_addr) {
 		log_error("failed to find base VMA");
-		res = -EFAULT;
+		res = -EINVAL;
 		goto out;
 	}
 	unsigned long id = (unsigned long)base_vma;
