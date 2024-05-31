@@ -84,6 +84,18 @@ if (ret) {
   close(syscall_dev);
   return EXIT_FAILURE;
 }
+
+// ...before exit...
+
+struct mem_overlay_cleanup_req cleanup_req = {
+	.id = req.id,
+};
+int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req);
+if (ret) {
+	printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n", strerror(errno));
+  close(syscall_dev);
+	return EXIT_FAILURE;
+}
 ```
 
 The device driver uses the following commands, which are defined in the
@@ -96,12 +108,9 @@ to register a new set of memory overlays for a base memory area.
 
 Each base memory can only be registered once.
 
-```c
-struct mem_overlay_segment_req {
-	unsigned long start_pgoff;
-	unsigned long end_pgoff;
-};
+#### `mem_overlay_req` Fields
 
+```c
 struct mem_overlay_req {
 	unsigned long id;
 
@@ -113,8 +122,6 @@ struct mem_overlay_req {
 };
 ```
 
-#### `mem_overlay_req` Fields
-
 * `id`: Request identifier. This value is set by the kernel module if the
   command succeeds and should not be set when making the request.
 * `base_addr`: Virtual address where the base file is mapped in memory.
@@ -123,6 +130,13 @@ struct mem_overlay_req {
 * `segments`: Array of memory segments to overlay.
 
 #### `mem_overlay_segment_req` Fields
+
+```c
+struct mem_overlay_segment_req {
+	unsigned long start_pgoff;
+	unsigned long end_pgoff;
+};
+```
 
 * `start_pgoff`: Page offset of where the segment start (inclusive).
 * `end_pgoff`: Page offset of where the segment ends (inclusive).
@@ -149,27 +163,13 @@ Every call to `IOCTL_MEM_OVERLAY_REQ_CMD` MUST be have a corresponding
 `IOCTL_MEM_OVERLAY_CLEANUP_CMD` before the program exits. Fail to do so may
 result kernel panics due to invalid memory pages left in the system.
 
-```c
-int syscall_dev = open("/dev/memory_overlay", O_WRONLY);
-if (syscall_dev < 0) {
-	printf("ERROR: failed to open /dev/memory_overlay: %s\n", strerror(errno));
-	return EXIT_FAILURE;
-}
-
-// ...register memory overlay...
-
-struct mem_overlay_cleanup_req cleanup_req = {
-	.id = req.id,
-};
-int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req);
-if (ret) {
-	printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n", strerror(errno));
-  close(syscall_dev);
-	return EXIT_FAILURE;
-}
-```
-
 #### `mem_overlay_cleanup_req` fields
+
+```c
+struct mem_overlay_cleanup_req {
+	unsigned long id;
+};
+```
 
 * `id`: Request identifier returned from a call to `IOCTL_MEM_OVERLAY_REQ_CMD`.
 
