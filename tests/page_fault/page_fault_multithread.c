@@ -153,7 +153,8 @@ int main()
 
 	int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
 	if (ret) {
-		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %d\n", ret);
+		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n",
+		       strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_syscall_dev;
 	}
@@ -181,7 +182,8 @@ int main()
 	memcpy(cleanup_req.id, req.id, sizeof(unsigned char) * UUID_SIZE);
 	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req);
 	if (ret) {
-		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %d\n", ret);
+		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n",
+		       strerror(errno));
 		res = EXIT_FAILURE;
 	}
 	printf("called IOCTL_MEM_OVERLAY_CLEANUP_CMD\n");

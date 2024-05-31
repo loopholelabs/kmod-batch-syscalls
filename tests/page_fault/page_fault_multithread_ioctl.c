@@ -101,7 +101,6 @@ void *ioctl_mem_overlay(void *args)
 		res = EXIT_FAILURE;
 		goto out;
 	}
-	printf("[%d] opened /dev/batch_syscalls device\n", tid);
 
 	int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, req);
 	if (ret) {
@@ -110,8 +109,6 @@ void *ioctl_mem_overlay(void *args)
 		res = EXIT_FAILURE;
 		goto close_syscall_dev;
 	}
-
-	printf("[%d] called IOCTL_MEM_OVERLAY_REQ_CMD\n", tid);
 
 close_syscall_dev:
 	close(syscall_dev);
@@ -132,7 +129,6 @@ void *ioctl_cleanup(void *args)
 		res = EXIT_FAILURE;
 		goto out;
 	}
-	printf("[%d] opened /dev/batch_syscalls device\n", tid);
 
 	int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, req);
 	if (ret) {
@@ -140,7 +136,6 @@ void *ioctl_cleanup(void *args)
 		       strerror(errno));
 		res = EXIT_FAILURE;
 	}
-	printf("[%d] called IOCTL_MEM_OVERLAY_CLEANUP_CMD\n", tid);
 
 close_syscall_dev:
 	close(syscall_dev);
@@ -157,14 +152,16 @@ int main()
 
 	int base_fd = open(base_file, O_RDONLY);
 	if (base_fd < 0) {
-		printf("ERROR: could not open base file: %d\n", base_fd);
+		printf("ERROR: could not open base file %s: %s\n", base_file,
+		       strerror(errno));
 		return EXIT_FAILURE;
 	}
 	printf("base file %s opened\n", base_file);
 
 	base_mmap = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
 	if (base_mmap == MAP_FAILED) {
-		printf("ERROR: could not mmap base file\n");
+		printf("ERROR: could not mmap base file %s: %s\n", base_file,
+		       strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_base;
 	}
@@ -172,7 +169,8 @@ int main()
 
 	int overlay_fd = open(overlay_file, O_RDONLY);
 	if (overlay_fd < 0) {
-		printf("ERROR: could not open overlay file: %d\n", overlay_fd);
+		printf("ERROR: could not open overlay file %s: %s\n",
+		       overlay_file, strerror(errno));
 		res = EXIT_FAILURE;
 		goto unmap_base;
 	}
@@ -181,7 +179,8 @@ int main()
 	char *overlay_map =
 		mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, overlay_fd, 0);
 	if (overlay_map == MAP_FAILED) {
-		printf("ERROR: could not mmap overlay file\n");
+		printf("ERROR: could not mmap overlay file %s: %s\n",
+		       overlay_file, strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_overlay;
 	}
@@ -204,6 +203,7 @@ int main()
 	printf("generated memory overlay request\n");
 
 	// Call memory overlay ioctl multiple times.
+	printf("= TEST: call IOCTL_MEM_OVERLAY_REQ_CMD multiple times\n");
 	for (long i = 0; i < nr_threads; i++) {
 		pthread_create(&tid[i], NULL, ioctl_mem_overlay, (void *)&req);
 	}
@@ -222,13 +222,16 @@ int main()
 		}
 	}
 	if (success != 1) {
-		printf("ERROR: expected one thread to succeed in calling IOCTL_MEM_OVERLAY_REQ_CMD, got %d\n",
+		printf("== ERROR: expected one thread to succeed in calling IOCTL_MEM_OVERLAY_REQ_CMD, got %d\n",
 		       success);
 		res = EXIT_FAILURE;
 		goto free_elements;
 	}
+	printf("== OK: calls to IOCTL_MEM_OVERLAY_REQ_CMD completed successfully! success=%d fail=%d\n",
+	       success, fail);
 
 	// Call cleanup ioctl multiple times.
+	printf("= TEST: call IOCTL_MEM_OVERLAY_CLEANUP_CMD multiple times\n");
 	struct mem_overlay_cleanup_req cleanup_req;
 	memcpy(cleanup_req.id, req.id, sizeof(unsigned char) * UUID_SIZE);
 	for (long i = 0; i < nr_threads; i++) {
@@ -250,11 +253,13 @@ int main()
 		}
 	}
 	if (success != 1) {
-		printf("ERROR: expected one thread to succeed in calling IOCTL_MEM_OVERLAY_CLEANUP_CMD, got %d\n",
-		       success);
+		printf("ERROR: expected one thread to succeed in calling IOCTL_MEM_OVERLAY_CLEANUP_CMD success=%d fail=%d\n",
+		       success, fail);
 		res = EXIT_FAILURE;
 		goto free_elements;
 	}
+	printf("== OK: calls to IOCTL_MEM_OVERLAY_CLEANUP_CMD completed successfully! success=%d fail=%d\n",
+	       success, fail);
 
 free_elements:
 	free(req.segments);
