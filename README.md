@@ -39,12 +39,14 @@ The following log levels are available.
 
 ## Testing and Examples
 
-The folder `tests/page_fault` contains several userspace C programs that can be
-used to test the kernel module and as examples on how to use it.
+The folder [`tests/page_fault`](tests/page_fault) contains several userspace C
+programs that can be used to test the kernel module and as examples on how to
+use it.
 
 The test programs map randomized test files into memory. You can generate them
-using the `test/generate.go` helper. This program requires the Go toolchain to
-be installed. You can execute the helper with the following command.
+using the [`tests/generate.go`](tests/generate.go) helper. This program
+requires the Go toolchain to be installed. You can execute the helper with the
+following command.
 
 ```bash
 make tests-generate
@@ -85,9 +87,9 @@ if (ret) {
 ```
 
 The device driver uses the following commands, which are defined in the
-`commong.h` file.
+[`common.h`](common.h) file.
 
-### `IOCTL_MEM_OVERLAY_REQ_CMD`
+### `IOCTL_MEM_OVERLAY_REQ_CMD` Command
 
 The `IOCTL_MEM_OVERLAY_REQ_CMD` takes a `mem_overlay_req` as input and is used
 to register a new set of memory overlays for a base memory area.
@@ -127,7 +129,7 @@ struct mem_overlay_req {
 
 #### Return Value
 
-On success, a zero is returned. On error, -1 is returned, and
+On success, a `0` is returned. On error, `-1` is returned, and
 [`errno`][man_errno] is set to indicate the error.
 
 #### Errors
@@ -138,7 +140,7 @@ On success, a zero is returned. On error, -1 is returned, and
 * `EEXIST`: Base file is already registered.
 * `ENOMEM`: Failed to allocate memory.
 
-### `IOCTL_MEM_OVERLAY_CLEANUP_CMD`
+### `IOCTL_MEM_OVERLAY_CLEANUP_CMD` Command
 
 The `IOCTL_MEM_OVERLAY_CLEANUP_CMD` takes a `mem_overlay_cleanup_req` as input
 and is used to remove a previous memory overlay request from the kernel module.
@@ -173,7 +175,7 @@ if (ret) {
 
 #### Return value
 
-On success, a zero is returned. On error, -1 is returned, and
+On success, a `0` is returned. On error, `-1` is returned, and
 [`errno`][man_errno] is set to indicate the error.
 
 #### Errors
@@ -266,9 +268,10 @@ To avoid this issue, run the tests from a non-FUSE file system.
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at [https://github.com/loopholelabs/kmod-batch-syscalls][gitrepo]. For more
-contribution information check
-out [the contribution guide](https://github.com/loopholelabs/kmod-batch-syscalls/blob/master/CONTRIBUTING.md).
+Bug reports and pull requests are welcome on GitHub at
+[https://github.com/loopholelabs/kmod-batch-syscalls][gitrepo]. For more
+contribution information check out [the contribution
+guide](https://github.com/loopholelabs/kmod-batch-syscalls/blob/master/CONTRIBUTING.md).
 
 ## License
 
@@ -277,7 +280,9 @@ the [GPL v3 License](https://www.gnu.org/licenses/gpl-3.0.en.html).
 
 ## Code of Conduct
 
-Everyone interacting in this project’s codebases, issue trackers, chat rooms and mailing lists is expected to follow the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
+Everyone interacting in this project’s codebases, issue trackers, chat rooms
+and mailing lists is expected to follow the [CNCF Code of
+Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 
 ## Project Managed By:
 
