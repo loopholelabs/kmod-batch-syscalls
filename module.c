@@ -307,7 +307,7 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 
 	log_info("memory overlay created successfully uuid=%pUB",
 		 mem_overlay->id);
-	goto out;
+	goto free_segs;
 
 revert_vm_ops:
 	base_vma->vm_ops = mem_overlay->original_vm_ops;
