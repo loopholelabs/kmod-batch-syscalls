@@ -260,18 +260,6 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 			       GFP_KERNEL);
 	}
 
-	// Generate request UUID and send it back to userspace so it can be used
-	// in future user commands to reference this memory overlay instance.
-	generate_random_uuid(mem_overlay->id);
-	memcpy(req.id, mem_overlay->id, sizeof(unsigned char) * UUID_SIZE);
-	ret = copy_to_user((struct mem_overlay_req *)arg, &req,
-			   sizeof(struct mem_overlay_req));
-	if (ret) {
-		log_error("failed to copy memory overlay ID to user: %lu", ret);
-		res = -EFAULT;
-		goto cleanup_segments;
-	}
-
 	// Hijack page fault handler for base VMA.
 	log_info("hijacking vm_ops for base VMA addr=0x%lu", req.base_addr);
 	mem_overlay->hijacked_vm_ops =
@@ -292,6 +280,10 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 	base_vma->vm_ops = mem_overlay->hijacked_vm_ops;
 	log_info("done hijacking vm_ops addr=0x%lu", req.base_addr);
 
+	// Generate request UUID and send it back to userspace so it can be used
+	// in future user commands to reference this memory overlay instance.
+	generate_random_uuid(mem_overlay->id);
+
 	// Store memory overlay ID on base VMA private data so we can retrieve it
 	// when handling a page fault.
 	base_vma->vm_private_data = mem_overlay->id;
@@ -301,6 +293,16 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 	if (iret) {
 		log_error("failed to insert memory overlay into hashtable: %d",
 			  iret);
+		res = -EFAULT;
+		goto revert_vm_ops;
+	}
+
+	// Copy generated UUID to userspace.
+	memcpy(req.id, mem_overlay->id, sizeof(unsigned char) * UUID_SIZE);
+	ret = copy_to_user((struct mem_overlay_req *)arg, &req,
+			   sizeof(struct mem_overlay_req));
+	if (ret) {
+		log_error("failed to copy memory overlay ID to user: %lu", ret);
 		res = -EFAULT;
 		goto revert_vm_ops;
 	}
