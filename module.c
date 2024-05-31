@@ -42,34 +42,6 @@ MODULE_LICENSE("GPL");
 
 static struct hashtable *mem_overlays;
 
-static void cleanup_mem_overlay_segments(struct xarray segments)
-{
-	unsigned long i;
-	struct mem_overlay_segment *seg;
-	xa_for_each(&segments, i, seg) {
-		kvfree(seg);
-	}
-	xa_destroy(&segments);
-}
-
-/*
- * Free memory used by a memory overlay entry. If the process that owns the
- * memory can be assumed to still be running, a mm mmap write lock should be
- * held before calling this function.
- */
-static void cleanup_mem_overlay(void *data)
-{
-	struct mem_overlay *mem_overlay = (struct mem_overlay *)data;
-
-	// Revert base VMA vm_ops to its original value in case the VMA is used
-	// after cleanup (usually to call ->close() on unmap).
-	mem_overlay->base_vma->vm_ops = mem_overlay->original_vm_ops;
-
-	kvfree(mem_overlay->hijacked_vm_ops);
-	cleanup_mem_overlay_segments(mem_overlay->segments);
-	kvfree(mem_overlay);
-}
-
 static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 				     pgoff_t end_pgoff)
 {
@@ -140,6 +112,38 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 	rcu_read_unlock();
 	spin_unlock(&mem_overlay->vma_file_lock);
 	return ret;
+}
+
+static void cleanup_mem_overlay_segments(struct xarray segments)
+{
+	unsigned long i;
+	struct mem_overlay_segment *seg;
+	xa_for_each(&segments, i, seg) {
+		kvfree(seg);
+	}
+	xa_destroy(&segments);
+}
+
+/*
+ * Free memory used by a memory overlay entry. If the process that owns the
+ * memory can be assumed to still be running, a mm mmap write lock should be
+ * held before calling this function.
+ */
+static void cleanup_mem_overlay(void *data)
+{
+	struct mem_overlay *mem_overlay = (struct mem_overlay *)data;
+
+	// Revert base VMA vm_ops to its original value in case the VMA is used
+	// after cleanup (usually to call ->close() on unmap).
+	const struct vm_operations_struct *vm_ops =
+		mem_overlay->base_vma->vm_ops;
+	if (vm_ops != NULL && vm_ops->map_pages == hijacked_map_pages) {
+		mem_overlay->base_vma->vm_ops = mem_overlay->original_vm_ops;
+	}
+
+	kvfree(mem_overlay->hijacked_vm_ops);
+	cleanup_mem_overlay_segments(mem_overlay->segments);
+	kvfree(mem_overlay);
 }
 
 static int device_open(struct inode *device_file, struct file *instance)
