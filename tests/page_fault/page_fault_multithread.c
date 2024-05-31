@@ -160,6 +160,7 @@ int main()
 	}
 	printf("called IOCTL_MEM_OVERLAY_REQ_CMD\n");
 
+	printf("= TEST: generate concurrent page faults\n");
 	for (long i = 0; i < nr_threads; i++) {
 		pthread_create(&tid[i], NULL, page_fault, (void *)i);
 	}
@@ -177,7 +178,16 @@ int main()
 			break;
 		}
 	}
+	if (fail != 0) {
+		printf("== ERROR: expected all threads to succeed, got %d failures\n",
+		       fail);
+		res = EXIT_FAILURE;
+		goto cleanup;
+	}
+	printf("== OK: all threads completed successfully! success=%d fail=%d\n",
+	       success, fail);
 
+cleanup:;
 	struct mem_overlay_cleanup_req cleanup_req = {
 		.id = req.id,
 	};
@@ -207,8 +217,6 @@ close_base:
 	close(base_fd);
 	printf("closed base\n");
 
-	printf("done success=%d fail=%d\n", success, fail);
-	if (fail > 0)
-		res = EXIT_FAILURE;
+	printf("done\n");
 	return res;
 }
