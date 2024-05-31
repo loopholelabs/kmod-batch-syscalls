@@ -23,17 +23,13 @@
 #define IOCTL_MEM_OVERLAY_CLEANUP_CMD \
 	_IOWR(MAGIC, 2, struct mem_overlay_cleanup_req *)
 
-#ifndef UUID_SIZE
-#define UUID_SIZE 16
-#endif
-
 struct mem_overlay_segment_req {
 	unsigned long start_pgoff;
 	unsigned long end_pgoff;
 };
 
 struct mem_overlay_req {
-	unsigned char id[UUID_SIZE];
+	unsigned long id;
 
 	unsigned long base_addr;
 	unsigned long overlay_addr;
@@ -43,7 +39,7 @@ struct mem_overlay_req {
 };
 
 struct mem_overlay_cleanup_req {
-	unsigned char id[UUID_SIZE];
+	unsigned long id;
 };
 
 #endif //BATCH_SYSCALLS_COMMON_H

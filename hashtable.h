@@ -18,11 +18,15 @@
 #ifndef BATCH_SYSCALLS_HASHTABLE_COMMON_H
 #define BATCH_SYSCALLS_HASHTABLE_COMMON_H
 
+#ifndef UUID_SIZE
+#define UUID_SIZE 16
+#endif
+
 #include <linux/rhashtable.h>
 #include <linux/uuid.h>
 
 struct hashtable_object {
-	unsigned char key[UUID_SIZE];
+	unsigned long key;
 	struct rhash_head linkage;
 	void *data;
 	struct rcu_head rcu_read;
@@ -35,12 +39,10 @@ struct hashtable {
 };
 
 struct hashtable *hashtable_setup(void (*free)(void *ptr));
-int hashtable_insert(struct hashtable *hashtable,
-		     const unsigned char key[UUID_SIZE], void *data);
-void *hashtable_lookup(struct hashtable *hashtable,
-		       const unsigned char key[UUID_SIZE]);
-void *hashtable_delete(struct hashtable *hashtable,
-		       const unsigned char key[UUID_SIZE]);
+int hashtable_insert(struct hashtable *hashtable, const unsigned long key,
+		     void *data);
+void *hashtable_lookup(struct hashtable *hashtable, const unsigned long key);
+void *hashtable_delete(struct hashtable *hashtable, const unsigned long key);
 void hashtable_cleanup(struct hashtable *hashtable);
 
 #endif //BATCH_SYSCALLS_HASHTABLE_COMMON_H

@@ -45,13 +45,13 @@ static struct hashtable *mem_overlays;
 static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 				     pgoff_t end_pgoff)
 {
-	void *id = vmf->vma->vm_private_data;
-	log_debug("page fault page=%lu start=%lu end=%lu uuid=%pUB ",
-		  vmf->pgoff, start_pgoff, end_pgoff, id);
+	unsigned long id = (unsigned long)vmf->vma;
+	log_debug("page fault page=%lu start=%lu end=%lu id=%lu", vmf->pgoff,
+		  start_pgoff, end_pgoff, id);
 
 	struct mem_overlay *mem_overlay = hashtable_lookup(mem_overlays, id);
 	if (!mem_overlay) {
-		log_error("unable to find memory overlay uuid=%pUB", id);
+		log_error("unable to find memory overlay id=%lu", id);
 		return VM_FAULT_SIGBUS;
 	}
 
@@ -74,7 +74,7 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 		if (seg == NULL) {
 			end = end_pgoff;
 			log_debug(
-				"handling base page fault start=%lu end=%lu uuid=%pUB",
+				"handling base page fault start=%lu end=%lu id=%lu",
 				start, end, id);
 
 			ret = filemap_map_pages(vmf, start, end);
@@ -85,7 +85,7 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 		if (start < seg->start_pgoff) {
 			end = seg->start_pgoff - 1;
 			log_debug(
-				"handling base page fault start=%lu end=%lu uuid=%pUB",
+				"handling base page fault start=%lu end=%lu id=%lu",
 				start, end, id);
 
 			ret = filemap_map_pages(vmf, start, end);
@@ -97,7 +97,7 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 		start = seg->start_pgoff;
 		end = min(seg->end_pgoff, end_pgoff);
 		log_debug(
-			"handling overlay page fault start=%lu end=%lu uuid=%pUB",
+			"handling overlay page fault start=%lu end=%lu id=%lu",
 			start, end, id);
 
 		// TODO: acquire write lock on vmf->vma->vm_mm.
@@ -179,7 +179,7 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 	// TODO: support per-VMA locking (https://lwn.net/Articles/937943/).
 	mmap_write_lock(current->mm);
 
-	// Find overlay VMA to store it into each segment.
+	// Find base and overlay VMAs.
 	struct vm_area_struct *overlay_vma =
 		find_vma(current->mm, req.overlay_addr);
 	if (overlay_vma == NULL || overlay_vma->vm_start > req.overlay_addr) {
@@ -188,18 +188,27 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		goto out;
 	}
 
-	// Find base VMA and validate we can use it.
 	struct vm_area_struct *base_vma = find_vma(current->mm, req.base_addr);
 	if (base_vma == NULL || base_vma->vm_start > req.base_addr) {
 		log_error("failed to find base VMA");
 		res = -EFAULT;
 		goto out;
 	}
+	unsigned long id = (unsigned long)base_vma;
 
-	if (base_vma->vm_private_data != NULL) {
-		log_crit("base VMA private data already set");
-		res = -EFAULT;
-		goto out;
+	// Check if VMA is already stored.
+	struct mem_overlay *mem_overlay = hashtable_lookup(mem_overlays, id);
+	if (mem_overlay) {
+		if (base_vma->vm_ops->map_pages == hijacked_map_pages) {
+			log_error("memory overlay already exists");
+			res = -EEXIST;
+			goto out;
+		}
+
+		// Leftover memory overlay, delete from state and proceed.
+		cleanup_mem_overlay(mem_overlay);
+		hashtable_delete(mem_overlays, id);
+		mem_overlay = NULL;
 	}
 
 	// Read overlay segments from request.
@@ -227,8 +236,7 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		req.base_addr, req.overlay_addr);
 
 	// Create new memory overlay instance.
-	struct mem_overlay *mem_overlay =
-		kvzalloc(sizeof(struct mem_overlay), GFP_KERNEL);
+	mem_overlay = kvzalloc(sizeof(struct mem_overlay), GFP_KERNEL);
 	if (!mem_overlay) {
 		log_error("failed to allocate memory for memory overlay");
 		res = -ENOMEM;
@@ -284,16 +292,8 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 	base_vma->vm_ops = mem_overlay->hijacked_vm_ops;
 	log_info("done hijacking vm_ops addr=0x%lu", req.base_addr);
 
-	// Generate request UUID and send it back to userspace so it can be used
-	// in future user commands to reference this memory overlay instance.
-	generate_random_uuid(mem_overlay->id);
-
-	// Store memory overlay ID on base VMA private data so we can retrieve it
-	// when handling a page fault.
-	base_vma->vm_private_data = mem_overlay->id;
-
 	// Save memory overlay into hashtable.
-	int iret = hashtable_insert(mem_overlays, mem_overlay->id, mem_overlay);
+	int iret = hashtable_insert(mem_overlays, id, mem_overlay);
 	if (iret) {
 		log_error("failed to insert memory overlay into hashtable: %d",
 			  iret);
@@ -301,8 +301,8 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		goto revert_vm_ops;
 	}
 
-	// Copy generated UUID to userspace.
-	memcpy(req.id, mem_overlay->id, sizeof(unsigned char) * UUID_SIZE);
+	// Return ID to userspace request.
+	req.id = id;
 	ret = copy_to_user((struct mem_overlay_req *)arg, &req,
 			   sizeof(struct mem_overlay_req));
 	if (ret) {
@@ -311,8 +311,7 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 		goto revert_vm_ops;
 	}
 
-	log_info("memory overlay created successfully uuid=%pUB",
-		 mem_overlay->id);
+	log_info("memory overlay created successfully id=%lu", id);
 	goto free_segs;
 
 revert_vm_ops:
@@ -344,7 +343,7 @@ static long int unlocked_ioctl_handle_mem_overlay_cleanup_req(unsigned long arg)
 	struct mem_overlay *mem_overlay =
 		hashtable_delete(mem_overlays, req.id);
 	if (!mem_overlay) {
-		log_error("failed to cleanup memory overlay uuid=%pUb", req.id);
+		log_error("failed to cleanup memory overlay id=%lu", req.id);
 		return -EFAULT;
 	}
 

@@ -4,7 +4,7 @@ ifdef VERIFY
     CFLAGS += -DVERIFY
 endif
 
-%.out: page_fault/%.c
+%.out: page_fault/%.c ../common.h
 	gcc ${CFLAGS} $< -I../ -o $@
 
 .PHONY: binaries

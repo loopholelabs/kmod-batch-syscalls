@@ -314,8 +314,9 @@ int main()
 cleanup:
 	// Clean up memory overlay.
 	printf("[%d] calling IOCTL_MEM_OVERLAY_CLEANUP_CMD\n", pid);
-	struct mem_overlay_cleanup_req cleanup_req;
-	memcpy(cleanup_req.id, req.id, sizeof(unsigned char) * UUID_SIZE);
+	struct mem_overlay_cleanup_req cleanup_req = {
+		.id = req.id,
+	};
 	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req);
 	if (ret) {
 		printf("[%d] ERROR: could not call 'IOCTL_MMAP_CMD': %s\n", pid,

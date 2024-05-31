@@ -32,8 +32,6 @@ struct mem_overlay_segment {
 };
 
 struct mem_overlay {
-	unsigned char id[UUID_SIZE];
-
 	unsigned long base_addr;
 	struct vm_area_struct *base_vma;
 	spinlock_t vma_file_lock;

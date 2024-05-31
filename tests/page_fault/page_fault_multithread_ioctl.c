@@ -232,8 +232,9 @@ int main()
 
 	// Call cleanup ioctl multiple times.
 	printf("= TEST: call IOCTL_MEM_OVERLAY_CLEANUP_CMD multiple times\n");
-	struct mem_overlay_cleanup_req cleanup_req;
-	memcpy(cleanup_req.id, req.id, sizeof(unsigned char) * UUID_SIZE);
+	struct mem_overlay_cleanup_req cleanup_req = {
+		.id = req.id,
+	};
 	for (long i = 0; i < nr_threads; i++) {
 		pthread_create(&tid[i], NULL, ioctl_cleanup,
 			       (void *)&cleanup_req);

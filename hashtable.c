@@ -23,7 +23,7 @@
 #include "log.h"
 
 const static struct rhashtable_params hashtable_object_params = {
-	.key_len = sizeof(unsigned char) * UUID_SIZE,
+	.key_len = sizeof(unsigned long),
 	.key_offset = offsetof(struct hashtable_object, key),
 	.head_offset = offsetof(struct hashtable_object, linkage),
 };
@@ -66,8 +66,8 @@ struct hashtable *hashtable_setup(void (*free)(void *data))
 	return hashtable;
 }
 
-int hashtable_insert(struct hashtable *hashtable,
-		     const unsigned char key[UUID_SIZE], void *data)
+int hashtable_insert(struct hashtable *hashtable, const unsigned long key,
+		     void *data)
 {
 	log_trace("start hashtable_insert for hashtable with id '%pUB'",
 		  hashtable->id);
@@ -82,9 +82,9 @@ int hashtable_insert(struct hashtable *hashtable,
 		return -ENOMEM;
 	}
 	object->data = data;
-	memcpy(object->key, key, sizeof(unsigned char) * UUID_SIZE);
+	object->key = key;
 	log_debug(
-		"inserting hashtable object with key '%pUB' for hashtable with id '%pUB'",
+		"inserting hashtable object with key '%lu' for hashtable with id '%pUB'",
 		key, hashtable->id);
 	int ret = rhashtable_lookup_insert_fast(&hashtable->rhashtable,
 						&object->linkage,
@@ -94,20 +94,19 @@ int hashtable_insert(struct hashtable *hashtable,
 	return ret;
 }
 
-void *hashtable_lookup(struct hashtable *hashtable,
-		       const unsigned char key[UUID_SIZE])
+void *hashtable_lookup(struct hashtable *hashtable, const unsigned long key)
 {
 	log_trace("called hashtable_lookup for hashtable with id '%pUB'",
 		  hashtable->id);
 	void *data = NULL;
 	rcu_read_lock();
 	struct hashtable_object *object = rhashtable_lookup(
-		&hashtable->rhashtable, key, hashtable_object_params);
+		&hashtable->rhashtable, &key, hashtable_object_params);
 	if (object) {
 		data = object->data;
 	} else {
 		log_debug(
-			"hashtable object with key '%pUB' not found for hashtable with id '%pUB'",
+			"hashtable object with key '%lu' not found for hashtable with id '%pUB'",
 			key, hashtable->id);
 	}
 	rcu_read_unlock();
@@ -116,15 +115,14 @@ void *hashtable_lookup(struct hashtable *hashtable,
 	return data;
 }
 
-void *hashtable_delete(struct hashtable *hashtable,
-		       const unsigned char key[UUID_SIZE])
+void *hashtable_delete(struct hashtable *hashtable, const unsigned long key)
 {
 	log_trace("called hashtable_delete for hashtable with id '%pUB'",
 		  hashtable->id);
 	void *ret = NULL;
 	rcu_read_lock();
 	struct hashtable_object *object = rhashtable_lookup(
-		&hashtable->rhashtable, key, hashtable_object_params);
+		&hashtable->rhashtable, &key, hashtable_object_params);
 	if (object) {
 		if (!rhashtable_remove_fast(&hashtable->rhashtable,
 					    &object->linkage,
@@ -132,16 +130,16 @@ void *hashtable_delete(struct hashtable *hashtable,
 			ret = object->data;
 			kvfree_rcu(object, rcu_read);
 			log_debug(
-				"removed hashtable object '%pUB' for hashtable with id '%pUB'",
+				"removed hashtable object '%lu' for hashtable with id '%pUB'",
 				key, hashtable->id);
 		} else {
 			log_error(
-				"unable to remove hashtable object '%pUB' for hashtable with id '%pUB'",
+				"unable to remove hashtable object '%lu' for hashtable with id '%pUB'",
 				key, hashtable->id);
 		}
 	} else {
 		log_debug(
-			"hashtable object with key '%pUB' not found for hashtable with id '%pUB'",
+			"hashtable object with key '%lu' not found for hashtable with id '%pUB'",
 			key, hashtable->id);
 	}
 	rcu_read_unlock();
@@ -170,7 +168,7 @@ void hashtable_cleanup(struct hashtable *hashtable)
 			}
 			rhashtable_walk_stop(&iter);
 			log_debug(
-				"freeing hashtable object with key '%pUB' for hashtable with id '%pUB'",
+				"freeing hashtable object with key '%lu' for hashtable with id '%pUB'",
 				object->key, hashtable->id);
 			hashtable->free(object->data);
 			rhashtable_walk_start(&iter);
