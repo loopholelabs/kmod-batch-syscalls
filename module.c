@@ -52,18 +52,20 @@ static void cleanup_mem_overlay_segments(struct xarray segments)
 	xa_destroy(&segments);
 }
 
+/*
+ * Free memory used by a memory overlay entry. If the process that owns the
+ * memory can be assumed to still be running, a mm mmap write lock should be
+ * held before calling this function.
+ */
 static void cleanup_mem_overlay(void *data)
 {
 	struct mem_overlay *mem_overlay = (struct mem_overlay *)data;
 
 	// Revert base VMA vm_ops to its original value in case the VMA is used
 	// after cleanup (usually to call ->close() on unmap).
-	// TODO: support per-VMA locking (https://lwn.net/Articles/937943/).
-	mmap_write_lock(mem_overlay->base_vma->vm_mm);
 	mem_overlay->base_vma->vm_ops = mem_overlay->original_vm_ops;
-	kvfree(mem_overlay->hijacked_vm_ops);
-	mmap_write_unlock(mem_overlay->base_vma->vm_mm);
 
+	kvfree(mem_overlay->hijacked_vm_ops);
 	cleanup_mem_overlay_segments(mem_overlay->segments);
 	kvfree(mem_overlay);
 }
@@ -309,7 +311,6 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 
 revert_vm_ops:
 	base_vma->vm_ops = mem_overlay->original_vm_ops;
-	mmap_write_unlock(current->mm);
 	kvfree(mem_overlay->hijacked_vm_ops);
 cleanup_segments:
 	cleanup_mem_overlay_segments(mem_overlay->segments);
@@ -340,7 +341,11 @@ static long int unlocked_ioctl_handle_mem_overlay_cleanup_req(unsigned long arg)
 		log_error("failed to cleanup memory overlay uuid=%pUb", req.id);
 		return -EFAULT;
 	}
+
+	struct mm_struct *mm = mem_overlay->base_vma->vm_mm;
+	mmap_write_lock(mm);
 	cleanup_mem_overlay(mem_overlay);
+	mmap_write_unlock(mm);
 	return 0;
 }
 
