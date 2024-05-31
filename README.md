@@ -20,7 +20,7 @@ be done using the following command.
 make module
 ```
 
-The `batch-syscalls.ko` file will automatically be generated. It can then
+The `memory-overlay.ko` file will automatically be generated. It can then
 be loaded using `sudo make load` and unloaded using `sudo make unload`.
 
 It is possible to use the `LOG_LEVEL` variable to change the kernel module log

@@ -15,13 +15,15 @@
     along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef BATCH_SYSCALLS_COMMON_H
-#define BATCH_SYSCALLS_COMMON_H
+#ifndef MEMORY_OVERLAY_COMMON_H
+#define MEMORY_OVERLAY_COMMON_H
 
 #define MAGIC 's'
 #define IOCTL_MEM_OVERLAY_REQ_CMD _IOWR(MAGIC, 1, struct mem_overlay_req *)
 #define IOCTL_MEM_OVERLAY_CLEANUP_CMD \
 	_IOWR(MAGIC, 2, struct mem_overlay_cleanup_req *)
+
+static const char kmod_device_path[] = "/dev/memory_overlay";
 
 struct mem_overlay_segment_req {
 	unsigned long start_pgoff;
@@ -42,4 +44,4 @@ struct mem_overlay_cleanup_req {
 	unsigned long id;
 };
 
-#endif //BATCH_SYSCALLS_COMMON_H
+#endif //MEMORY_OVERLAY_COMMON_H

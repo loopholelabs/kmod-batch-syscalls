@@ -17,11 +17,11 @@
 
 #include <linux/xarray.h>
 
-#ifndef BATCH_SYSCALLS_MODULE_H
-#define BATCH_SYSCALLS_MODULE_H
+#ifndef MEMORY_OVERLAY_MODULE_H
+#define MEMORY_OVERLAY_MODULE_H
 
 #define MAJOR_DEV 64
-#define DEVICE_ID "batch_syscalls"
+#define DEVICE_ID "memory_overlay"
 
 struct mem_overlay_segment {
 	unsigned long overlay_addr;
@@ -42,4 +42,4 @@ struct mem_overlay {
 	struct vm_operations_struct *hijacked_vm_ops;
 };
 
-#endif //BATCH_SYSCALLS_MODULE_H
+#endif //MEMORY_OVERLAY_MODULE_H

@@ -201,10 +201,10 @@ int main()
 	req.segments[4].end_pgoff = 50;
 
 	// Call kernel module with ioctl call to the character device.
-	int syscall_dev = open("/dev/batch_syscalls", O_WRONLY);
+	int syscall_dev = open(kmod_device_path, O_WRONLY);
 	if (syscall_dev < 0) {
-		printf("[%d] ERROR: could not open /dev/batch_syscalls: %d\n",
-		       pid, syscall_dev);
+		printf("[%d] ERROR: could not open %s: %d\n", pid,
+		       kmod_device_path, syscall_dev);
 		res = EXIT_FAILURE;
 		goto free_elements;
 	}

@@ -15,16 +15,16 @@
     along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef BATCH_SYSCALLS_LOG_H
-#define BATCH_SYSCALLS_LOG_H
+#ifndef MEMORY_OVERLAY_LOG_H
+#define MEMORY_OVERLAY_LOG_H
 
-#define _log_prepend_crit "[batch_syscalls  (CRIT)]:"
-#define _log_prepend_error "[batch_syscalls (ERROR)]:"
-#define _log_prepend_warn "[batch_syscalls  (WARN)]:"
-#define _log_prepend_info "[batch_syscalls  (INFO)]:"
-#define _log_prepend_debug "[batch_syscalls (DEBUG)]:"
-#define _log_prepend_trace "[batch_syscalls (TRACE)]:"
-#define _log_prepend_benchmark "[batch_syscalls (BENCH)]:"
+#define _log_prepend_crit "[memory_overlay  (CRIT)]:"
+#define _log_prepend_error "[memory_overlay (ERROR)]:"
+#define _log_prepend_warn "[memory_overlay  (WARN)]:"
+#define _log_prepend_info "[memory_overlay  (INFO)]:"
+#define _log_prepend_debug "[memory_overlay (DEBUG)]:"
+#define _log_prepend_trace "[memory_overlay (TRACE)]:"
+#define _log_prepend_benchmark "[memory_overlay (BENCH)]:"
 
 #define log_crit(fmt, ...)                                             \
 	printk(KERN_CRIT _log_prepend_crit " " fmt "\n" __VA_OPT__(, ) \
@@ -63,4 +63,4 @@
 #define log_benchmark(fmt, ...)
 #endif
 
-#endif //BATCH_SYSCALLS_LOG_H
+#endif //MEMORY_OVERLAY_LOG_H

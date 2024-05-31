@@ -15,8 +15,8 @@
     along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef BATCH_SYSCALLS_HASHTABLE_COMMON_H
-#define BATCH_SYSCALLS_HASHTABLE_COMMON_H
+#ifndef MEMORY_OVERLAY_HASHTABLE_COMMON_H
+#define MEMORY_OVERLAY_HASHTABLE_COMMON_H
 
 #ifndef UUID_SIZE
 #define UUID_SIZE 16
@@ -45,4 +45,4 @@ void *hashtable_lookup(struct hashtable *hashtable, const unsigned long key);
 void *hashtable_delete(struct hashtable *hashtable, const unsigned long key);
 void hashtable_cleanup(struct hashtable *hashtable);
 
-#endif //BATCH_SYSCALLS_HASHTABLE_COMMON_H
+#endif //MEMORY_OVERLAY_HASHTABLE_COMMON_H

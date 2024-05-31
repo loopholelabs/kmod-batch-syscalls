@@ -37,7 +37,7 @@
 #include "log.h"
 
 MODULE_AUTHOR("Loophole Labs (Shivansh Vij)");
-MODULE_DESCRIPTION("Batch Syscalls");
+MODULE_DESCRIPTION("Memory overlay");
 MODULE_LICENSE("GPL");
 
 static struct hashtable *mem_overlays;

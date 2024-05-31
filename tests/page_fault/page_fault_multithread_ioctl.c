@@ -94,10 +94,10 @@ void *ioctl_mem_overlay(void *args)
 	int res = EXIT_SUCCESS;
 	struct mem_overlay_req *req = args;
 
-	int syscall_dev = open("/dev/batch_syscalls", O_WRONLY);
+	int syscall_dev = open(kmod_device_path, O_WRONLY);
 	if (syscall_dev < 0) {
-		printf("[%d] ERROR: could not open /dev/batch_syscalls: %d\n",
-		       tid, syscall_dev);
+		printf("[%d] ERROR: could not open %s: %d\n", tid,
+		       kmod_device_path, syscall_dev);
 		res = EXIT_FAILURE;
 		goto out;
 	}
@@ -122,10 +122,10 @@ void *ioctl_cleanup(void *args)
 	int res = EXIT_SUCCESS;
 	struct mem_overlay_cleanup_req *req = args;
 
-	int syscall_dev = open("/dev/batch_syscalls", O_WRONLY);
+	int syscall_dev = open(kmod_device_path, O_WRONLY);
 	if (syscall_dev < 0) {
-		printf("[%d] ERROR: could not open /dev/batch_syscalls: %d\n",
-		       tid, syscall_dev);
+		printf("[%d] ERROR: could not open %s: %d\n", tid,
+		       kmod_device_path, syscall_dev);
 		res = EXIT_FAILURE;
 		goto out;
 	}

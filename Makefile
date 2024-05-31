@@ -1,5 +1,5 @@
-obj-m := batch-syscalls.o
-batch-syscalls-objs := module.o log.o hashtable.o
+obj-m := memory-overlay.o
+memory-overlay-objs := module.o log.o hashtable.o
 
 LOG_LEVEL ?= 1
 ccflags-y += -DLOG_LEVEL=${LOG_LEVEL}
@@ -19,11 +19,11 @@ clean: tests-clean
 
 .PHONY: load
 load:
-	insmod batch-syscalls.ko
+	insmod memory-overlay.ko
 
 .PHONY: unload
 unload:
-	rmmod batch_syscalls
+	rmmod memory_overlay
 
 .PHONY: tests
 tests:

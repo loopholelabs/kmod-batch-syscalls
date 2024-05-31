@@ -142,14 +142,14 @@ int main()
 	}
 	printf("generated memory overlay request\n");
 
-	int syscall_dev = open("/dev/batch_syscalls", O_WRONLY);
+	int syscall_dev = open(kmod_device_path, O_WRONLY);
 	if (syscall_dev < 0) {
-		printf("ERROR: could not open /dev/batch_syscalls: %d\n",
+		printf("ERROR: could not open %s: %d\n", kmod_device_path,
 		       syscall_dev);
 		res = EXIT_FAILURE;
 		goto free_elements;
 	}
-	printf("opened /dev/batch_syscalls device\n");
+	printf("opened %s device\n", kmod_device_path);
 
 	int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
 	if (ret) {
