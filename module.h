@@ -34,8 +34,6 @@ struct mem_overlay_segment {
 struct mem_overlay {
 	unsigned long base_addr;
 	struct vm_area_struct *base_vma;
-	spinlock_t vma_file_lock;
-
 	struct xarray segments;
 
 	const struct vm_operations_struct *original_vm_ops;

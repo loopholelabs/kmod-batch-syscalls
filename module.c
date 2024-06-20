@@ -55,10 +55,7 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 		return VM_FAULT_SIGBUS;
 	}
 
-	spin_lock(&mem_overlay->vma_file_lock);
-
 	XA_STATE(xas, &mem_overlay->segments, start_pgoff);
-	struct file *base_vm_file = vmf->vma->vm_file;
 	struct mem_overlay_segment *seg;
 	vm_fault_t ret;
 	pgoff_t end;
@@ -100,17 +97,24 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 			"handling overlay page fault start=%lu end=%lu id=%lu",
 			start, end, id);
 
-		// TODO: acquire write lock on vmf->vma->vm_mm.
-		// A read lock may have already been acquired.
-		// https://docs.kernel.org/filesystems/locking.html#vm-operations-struct
-		vmf->vma->vm_file = seg->overlay_vma->vm_file;
+		// Make a copy of the target VMA to change its source file without
+		// affecting any potential concurrent reader.
+		struct vm_area_struct *vma_orig = vmf->vma;
+		struct vm_area_struct vma_copy;
+		memcpy(&vma_copy, vmf->vma, sizeof(struct vm_area_struct));
+		vma_copy.vm_file = seg->overlay_vma->vm_file;
+
+		// Use a pointer to the vmf->vma pointer to alter its refence since
+		// this field is marked as a const.
+		struct vm_area_struct **vma_p =
+			(struct vm_area_struct **)&vmf->vma;
+		*vma_p = &vma_copy;
 		ret = filemap_map_pages(vmf, start, end);
-		vmf->vma->vm_file = base_vm_file;
+		*vma_p = vma_orig;
 		if (ret & VM_FAULT_ERROR)
 			break;
 	}
 	rcu_read_unlock();
-	spin_unlock(&mem_overlay->vma_file_lock);
 	return ret;
 }
 
@@ -245,7 +249,6 @@ static long int unlocked_ioctl_handle_mem_overlay_req(unsigned long arg)
 	}
 
 	mem_overlay->base_addr = req.base_addr;
-	spin_lock_init(&mem_overlay->vma_file_lock);
 	xa_init(&(mem_overlay->segments));
 
 	struct mem_overlay_segment *seg;
