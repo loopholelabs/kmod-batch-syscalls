@@ -32,17 +32,50 @@
 
 #include "../../common.h"
 
-size_t page_size, total_size;
+// N represents a memory overlay fragmentation factor. The benchmark setup code
+// splits the base memory area into groups of N pages and overlays every other
+// group.
+//
+// The higher the value of N, the larger each memory overlay segment is, and
+// fewer segments are created.
+//
+// The examples below illustrate how the base memory is overlaid for different
+// values of N (X marks overlaid pages).
+//
+//   N=2
+//     1   2   3   4   5   6   7   8
+//   +---+---+---+---+---+---+---+---+
+//   | x | x |   |   | x | x |   |   |
+//   +---+---+---+---+---+---+---+---+
+//   | x | x |   |   | x | x |   |   |
+//   +---+---+---+---+---+---+---+---+
+//   | x | x |   |   | x | x |   |   |
+//   +---+---+---+---+---+---+---+---+
+//   :   :   :   :   :   :   :   :   :
+//
+//   N=5
+//     1   2   3   4   5   6   7   8
+//   +---+---+---+---+---+---+---+---+
+//   | x | x | x | x | x |   |   |   |
+//   +---+---+---+---+---+---+---+---+
+//   |   |   | x | x | x | x | x |   |
+//   +---+---+---+---+---+---+---+---+
+//   |   |   |   |   | x | x | x | x |
+//   +---+---+---+---+---+---+---+---+
+//   :   :   :   :   :   :   :   :   :
+//
+static const int N = 10;
 
-static const char base_file[] = "baseXL.bin";
-static const char clean_base_file[] = "baseXL2.bin";
-static const char overlay_file[] = "overlayXL.bin";
-static const int page_size_factor = 1024 * 1024;
+size_t PAGE_SIZE, TOTAL_SIZE, TOTAL_PAGES;
+
+static const char BASE_FILE[] = "baseXL.bin";
+static const char CLEAN_BASE_FILE[] = "baseXL2.bin";
+static const char OVERLAY_FILE[] = "overlayXL.bin";
+static const int PAGE_SIZE_FACTOR = 1024 * 1024;
 
 bool verify_test_cases(int overlay_fd, int base_fd, char *base_map)
 {
-	char *buffer = malloc(page_size);
-	memset(buffer, 0, page_size);
+	char *buffer = calloc(PAGE_SIZE, 1);
 	bool valid = true;
 
 	struct timespec before, after;
@@ -56,23 +89,24 @@ bool verify_test_cases(int overlay_fd, int base_fd, char *base_map)
 	printf("%ld.%.9ld: starting memory check\n", before.tv_sec,
 	       before.tv_nsec);
 
-	for (unsigned long pgoff = 0; pgoff < total_size / page_size; pgoff++) {
-		size_t offset = pgoff * page_size;
+	for (unsigned long pgoff = 0; pgoff < TOTAL_PAGES; pgoff++) {
+		size_t offset = pgoff * PAGE_SIZE;
 
 		int fd = base_fd;
-		if (overlay_fd > 0 && pgoff % 2 == 0) {
+		bool is_overlay = pgoff % (2 * N) >= 0 && pgoff % (2 * N) < N;
+		if (overlay_fd > 0 && is_overlay) {
 			fd = overlay_fd;
 		}
 		lseek(fd, offset, SEEK_SET);
-		read(fd, buffer, page_size);
+		read(fd, buffer, PAGE_SIZE);
 
-		if (memcmp(base_map + offset, buffer, page_size)) {
+		if (memcmp(base_map + offset, buffer, PAGE_SIZE)) {
 			printf("== ERROR: base memory does not match the file contents at page %lu\n",
 			       pgoff);
 			valid = false;
 			break;
 		}
-		memset(buffer, 0, page_size);
+		memset(buffer, 0, PAGE_SIZE);
 	}
 
 	if (clock_gettime(CLOCK_MONOTONIC, &after) < 0) {
@@ -97,63 +131,74 @@ out:
 	return valid;
 }
 
+void clear_cache()
+{
+	sync();
+	int cache_fd = open("/proc/sys/vm/drop_caches", O_WRONLY);
+	write(cache_fd, "3", 1);
+	close(cache_fd);
+}
+
 int main()
 {
 	int res = EXIT_SUCCESS;
 
-	page_size = sysconf(_SC_PAGESIZE);
-	total_size = page_size * page_size_factor;
-	printf("Using pagesize %lu with total size %lu\n", page_size,
-	       total_size);
+	PAGE_SIZE = sysconf(_SC_PAGESIZE);
+	TOTAL_SIZE = PAGE_SIZE * PAGE_SIZE_FACTOR;
+	TOTAL_PAGES = TOTAL_SIZE / PAGE_SIZE;
+	printf("Page size:     %lu bytes\n", PAGE_SIZE);
+	printf("Overlay size:  %d pages\n", N);
+	printf("Total size:    %lu bytes\n", TOTAL_SIZE);
+	printf("Total pages:   %lu pages\n", TOTAL_PAGES);
 
 	// Read base.bin test file and mmap it into memory.
-	int base_fd = open(base_file, O_RDONLY);
+	int base_fd = open(BASE_FILE, O_RDONLY);
 	if (base_fd < 0) {
-		printf("ERROR: could not open base file %s: %s\n", base_file,
+		printf("ERROR: could not open base file %s: %s\n", BASE_FILE,
 		       strerror(errno));
 		return EXIT_FAILURE;
 	}
 
-	int clean_base_fd = open(clean_base_file, O_RDONLY);
+	int clean_base_fd = open(CLEAN_BASE_FILE, O_RDONLY);
 	if (clean_base_fd < 0) {
 		printf("ERROR: could not open clean base file %s: %s\n",
-		       clean_base_file, strerror(errno));
+		       CLEAN_BASE_FILE, strerror(errno));
 		close(base_fd);
 		return EXIT_FAILURE;
 	}
 
-	char *base_mmap = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
+	char *base_mmap = mmap(NULL, TOTAL_SIZE, PROT_READ | PROT_WRITE,
 			       MAP_PRIVATE, base_fd, 0);
 	if (base_mmap == MAP_FAILED) {
-		printf("ERROR: could not mmap base file %s: %s\n", base_file,
+		printf("ERROR: could not mmap base file %s: %s\n", BASE_FILE,
 		       strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_base;
 	}
 
-	char *clean_base_mmap = mmap(NULL, total_size, PROT_READ, MAP_PRIVATE,
+	char *clean_base_mmap = mmap(NULL, TOTAL_SIZE, PROT_READ, MAP_PRIVATE,
 				     clean_base_fd, 0);
 	if (clean_base_mmap == MAP_FAILED) {
 		printf("ERROR: could not mmap second base file %s: %s\n",
-		       clean_base_file, strerror(errno));
+		       CLEAN_BASE_FILE, strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_base;
 	}
 
 	// Read overlay test file and create memory overlay request.
-	int overlay_fd = open(overlay_file, O_RDONLY);
+	int overlay_fd = open(OVERLAY_FILE, O_RDONLY);
 	if (overlay_fd < 0) {
 		printf("ERROR: could not open overlay file %s: %s\n",
-		       overlay_file, strerror(errno));
+		       OVERLAY_FILE, strerror(errno));
 		res = EXIT_FAILURE;
 		goto unmap_base;
 	}
 
 	char *overlay_map =
-		mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, overlay_fd, 0);
+		mmap(NULL, TOTAL_SIZE, PROT_READ, MAP_PRIVATE, overlay_fd, 0);
 	if (overlay_map == MAP_FAILED) {
 		printf("ERROR: could not mmap overlay file %s: %s\n",
-		       overlay_file, strerror(errno));
+		       OVERLAY_FILE, strerror(errno));
 		res = EXIT_FAILURE;
 		goto close_overlay;
 	}
@@ -161,19 +206,22 @@ int main()
 	struct mem_overlay_req req;
 	req.base_addr = *(unsigned long *)(&base_mmap);
 	req.overlay_addr = *(unsigned long *)(&overlay_map);
-	req.segments_size = total_size / page_size / 2;
-	req.segments = malloc(sizeof(struct mem_overlay_segment_req) *
+	req.segments_size = (TOTAL_PAGES + (2 * N - 1)) / (2 * N);
+	req.segments = calloc(sizeof(struct mem_overlay_segment_req),
 			      req.segments_size);
-	memset(req.segments, 0,
-	       sizeof(struct mem_overlay_segment_req) * req.segments_size);
 
-	printf("requesting %u operations and sending %lu bytes worth of mmap segments\n",
+	printf("Requesting %u operations and sending %lu bytes worth of mmap segments\n",
 	       req.segments_size,
 	       sizeof(struct mem_overlay_segment_req) * req.segments_size);
 
+	// Overlay every other N pages.
 	for (int i = 0; i < req.segments_size; i++) {
-		req.segments[i].start_pgoff = 2 * i;
-		req.segments[i].end_pgoff = 2 * i;
+		req.segments[i].start_pgoff = 2 * N * i;
+
+		// Cap segment end to the number of pages in the base memory area.
+		unsigned long end = 2 * N * i + (N - 1);
+		end = end > TOTAL_PAGES ? TOTAL_PAGES : end;
+		req.segments[i].end_pgoff = end;
 	}
 
 	// Call kernel module with ioctl call to the character device.
@@ -185,8 +233,7 @@ int main()
 		goto free_segments;
 	}
 
-	int ret;
-	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
+	int ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
 	if (ret) {
 		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n",
 		       strerror(errno));
@@ -195,6 +242,7 @@ int main()
 	}
 
 	printf("= TEST: checking memory contents with overlay\n");
+	clear_cache();
 	if (!verify_test_cases(overlay_fd, base_fd, base_mmap)) {
 		res = EXIT_FAILURE;
 		goto cleanup;
@@ -202,6 +250,7 @@ int main()
 	printf("== OK: overlay memory verification completed successfully!\n");
 
 	printf("= TEST: checking memory contents without overlay\n");
+	clear_cache();
 	if (!verify_test_cases(-1, clean_base_fd, clean_base_mmap)) {
 		res = EXIT_FAILURE;
 		goto cleanup;
@@ -224,12 +273,12 @@ close_syscall_dev:
 	close(syscall_dev);
 free_segments:
 	free(req.segments);
-	munmap(overlay_map, total_size);
+	munmap(overlay_map, TOTAL_SIZE);
 close_overlay:
 	close(overlay_fd);
 unmap_base:
-	munmap(clean_base_mmap, total_size);
-	munmap(base_mmap, total_size);
+	munmap(clean_base_mmap, TOTAL_SIZE);
+	munmap(base_mmap, TOTAL_SIZE);
 close_base:
 	close(clean_base_fd);
 	close(base_fd);

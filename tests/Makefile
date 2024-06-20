@@ -1,7 +1,8 @@
 tests = page_fault \
 				page_fault_multithread \
 				page_fault_multithread_ioctl \
-				page_fault_benchmark.out page_fault_fork \
+				page_fault_benchmark \
+				page_fault_fork \
 				page_fault_ioctl_error
 
 all: $(tests)

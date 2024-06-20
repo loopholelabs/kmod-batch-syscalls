@@ -91,10 +91,10 @@ static vm_fault_t hijacked_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff,
 			ret = filemap_map_pages(vmf, start, end);
 			if (ret & VM_FAULT_ERROR)
 				break;
+			start = end + 1;
 		}
 
 		// Handle fault over overlay range.
-		start = seg->start_pgoff;
 		end = min(seg->end_pgoff, end_pgoff);
 		log_debug(
 			"handling overlay page fault start=%lu end=%lu id=%lu",
