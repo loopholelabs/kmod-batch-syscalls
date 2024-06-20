@@ -120,6 +120,7 @@ static void cleanup_mem_overlay_segments(struct xarray segments)
 	struct mem_overlay_segment *seg;
 	xa_for_each(&segments, i, seg) {
 		kvfree(seg);
+		i = seg->end_pgoff + 1;
 	}
 	xa_destroy(&segments);
 }
@@ -351,6 +352,8 @@ static long int unlocked_ioctl_handle_mem_overlay_cleanup_req(unsigned long arg)
 	mmap_write_lock(mm);
 	cleanup_mem_overlay(mem_overlay);
 	mmap_write_unlock(mm);
+
+	log_info("memory overlay removed successfully id=%lu", req.id);
 	return 0;
 }
 

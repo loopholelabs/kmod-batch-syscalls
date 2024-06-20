@@ -38,21 +38,17 @@ struct test_case {
 	char *data;
 };
 
-size_t page_size, total_size;
-
-static const char base_file[] = "base.bin";
-static const char overlay_file[] = "overlay.bin";
-static const int page_size_factor = 1024;
+size_t PAGE_SIZE, TOTAL_SIZE;
 
 bool verify_test_cases(struct test_case *tcs, int tcs_nr, int base_fd,
 		       char *base_map)
 {
-	char *buffer = malloc(page_size);
-	memset(buffer, 0, page_size);
+	char *buffer = malloc(PAGE_SIZE);
+	memset(buffer, 0, PAGE_SIZE);
 	bool valid = true;
 
-	for (unsigned long pgoff = 0; pgoff < total_size / page_size; pgoff++) {
-		size_t offset = pgoff * page_size;
+	for (unsigned long pgoff = 0; pgoff < TOTAL_SIZE / PAGE_SIZE; pgoff++) {
+		size_t offset = pgoff * PAGE_SIZE;
 
 		struct test_case *tc = NULL;
 		for (int i = 0; i < tcs_nr; i++) {
@@ -71,99 +67,116 @@ bool verify_test_cases(struct test_case *tcs, int tcs_nr, int base_fd,
 			} else if (tc->data) {
 				printf("checking if page %lu has expected data\n",
 				       pgoff);
-				memcpy(buffer, tc->data, page_size);
+				memcpy(buffer, tc->data, PAGE_SIZE);
 				fd = -1;
 			}
 		}
 
 		if (fd > 0) {
 			lseek(fd, offset, SEEK_SET);
-			read(fd, buffer, page_size);
+			read(fd, buffer, PAGE_SIZE);
 		}
 
-		if (memcmp(base_map + offset, buffer, page_size)) {
+		if (memcmp(base_map + offset, buffer, PAGE_SIZE)) {
 			printf("== ERROR: base memory does not match the file contents at page %lu\n",
 			       pgoff);
 			valid = false;
 			break;
 		}
-		memset(buffer, 0, page_size);
+		memset(buffer, 0, PAGE_SIZE);
 	}
 
 	free(buffer);
 	return valid;
 }
 
-int main()
+void clear_cache()
 {
-	int res = EXIT_SUCCESS;
+	sync();
+	int cache_fd = open("/proc/sys/vm/drop_caches", O_WRONLY);
+	write(cache_fd, "3", 1);
+	close(cache_fd);
+}
 
-	page_size = sysconf(_SC_PAGESIZE);
-	total_size = page_size * page_size_factor;
-	printf("Using pagesize %lu with total size %lu\n", page_size,
-	       total_size);
-
-	// Read base.bin test file and mmap it into memory.
-	int base_fd = open(base_file, O_RDONLY);
-	if (base_fd < 0) {
-		printf("ERROR: could not open base file %s: %s\n", base_file,
+int mmap_file(char *filename, size_t size, int *fd, char **mmap_addr)
+{
+	*fd = open(filename, O_RDONLY);
+	if (*fd < 0) {
+		printf("ERROR: could not open file %s: %s\n", filename,
 		       strerror(errno));
 		return EXIT_FAILURE;
 	}
-	printf("opened base file %s\n", base_file);
 
-	char *base_mmap = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
-			       MAP_PRIVATE, base_fd, 0);
-	if (base_mmap == MAP_FAILED) {
-		printf("ERROR: could not mmap base file %s: %s\n", base_file,
+	*mmap_addr =
+		mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, *fd, 0);
+	if (*mmap_addr == MAP_FAILED) {
+		printf("ERROR: could not mmap file %s: %s\n", filename,
 		       strerror(errno));
-		res = EXIT_FAILURE;
-		goto close_base;
+		close(*fd);
+		return EXIT_FAILURE;
 	}
-	printf("mapped base file %s\n", base_file);
+	return EXIT_SUCCESS;
+}
 
+int call_kmod(unsigned long cmd, void *req)
+{
+	int syscall_dev = open(kmod_device_path, O_WRONLY);
+	if (syscall_dev < 0) {
+		printf("ERROR: could not open %s: %s\n", kmod_device_path,
+		       strerror(errno));
+		return EXIT_FAILURE;
+	}
+
+	int result = ioctl(syscall_dev, cmd, req);
+	if (result) {
+		printf("ERROR: could not call command %lu: %s\n", cmd,
+		       strerror(errno));
+		close(syscall_dev);
+		return EXIT_FAILURE;
+	}
+
+	close(syscall_dev);
+	return EXIT_SUCCESS;
+}
+
+int test_memory_read()
+{
+	clear_cache();
+	int res = EXIT_SUCCESS;
+
+	// Read base.bin test file and map it into memory.
+	int base_fd;
+	char *base_mmap;
+	if (mmap_file("base.bin", TOTAL_SIZE, &base_fd, &base_mmap)) {
+		return EXIT_FAILURE;
+	}
+
+	// mmap base.bin test file again in an area that will not be modified.
 	char *clean_base_mmap =
-		mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, base_fd, 0);
+		mmap(NULL, TOTAL_SIZE, PROT_READ, MAP_PRIVATE, base_fd, 0);
 	if (clean_base_mmap == MAP_FAILED) {
-		printf("ERROR: could not mmap clean base file %s: %s\n",
-		       base_file, strerror(errno));
-		res = EXIT_FAILURE;
-		goto close_base;
-	}
-	printf("mapped clean base file %s\n", overlay_file);
-
-	// Read overlay test file and create memory overlay request.
-	int overlay_fd = open(overlay_file, O_RDONLY);
-	if (overlay_fd < 0) {
-		printf("ERROR: could not open overlay file %s: %s\n",
-		       overlay_file, strerror(errno));
+		printf("ERROR: could not map clean base file %s: %s\n",
+		       "base.bin", strerror(errno));
 		res = EXIT_FAILURE;
 		goto unmap_base;
 	}
-	printf("opened overlay file %s\n", overlay_file);
+	printf("mapped clean base file %s\n", "base.bin");
 
-	char *overlay_map =
-		mmap(NULL, total_size, PROT_READ, MAP_PRIVATE, overlay_fd, 0);
-	if (overlay_map == MAP_FAILED) {
-		printf("ERROR: could not mmap overlay file %s: %s\n",
-		       overlay_file, strerror(errno));
+	// Read overlay.bin test file and map it into memory.
+	int overlay_fd;
+	char *overlay_mmap;
+	if (mmap_file("overlay.bin", TOTAL_SIZE, &overlay_fd, &overlay_mmap)) {
 		res = EXIT_FAILURE;
-		goto close_overlay;
+		goto unmap_clean_base;
 	}
-	printf("mapped overlay file %s\n", overlay_file);
 
+	// Create test memory overlay request with several overlay scenarios.
 	struct mem_overlay_req req;
 	req.base_addr = *(unsigned long *)(&base_mmap);
-	req.overlay_addr = *(unsigned long *)(&overlay_map);
-	req.segments_size = 5;
-	req.segments = malloc(sizeof(struct mem_overlay_segment_req) *
+	req.overlay_addr = *(unsigned long *)(&overlay_mmap);
+	req.segments_size = 6;
+	req.segments = calloc(sizeof(struct mem_overlay_segment_req),
 			      req.segments_size);
-	memset(req.segments, 0,
-	       sizeof(struct mem_overlay_segment_req) * req.segments_size);
-
-	printf("requesting %u operations and sending %lu bytes worth of mmap segments\n",
-	       req.segments_size,
-	       sizeof(struct mem_overlay_segment_req) * req.segments_size);
 
 	// Overlay single page.
 	req.segments[0].start_pgoff = 0;
@@ -179,148 +192,189 @@ int main()
 	req.segments[3].start_pgoff = 21;
 	req.segments[3].end_pgoff = 21;
 
-	// Large overlay that crosses fault-around borders.
+	// Large overlay that crosses fault-around and xa_store_range limits.
 	req.segments[4].start_pgoff = 30;
-	req.segments[4].end_pgoff = 50;
+	req.segments[4].end_pgoff = 70;
 
-	// Call kernel module with ioctl call to the character device.
-	int syscall_dev = open(kmod_device_path, O_WRONLY);
-	if (syscall_dev < 0) {
-		printf("ERROR: could not open %s: %s\n", kmod_device_path,
-		       strerror(errno));
+	// Another large overlay to make sure both ranges are cleaned up properly.
+	req.segments[5].start_pgoff = 80;
+	req.segments[5].end_pgoff = 140;
+
+	if (call_kmod(IOCTL_MEM_OVERLAY_REQ_CMD, &req)) {
 		res = EXIT_FAILURE;
 		goto free_segments;
+	};
+
+	// Create expected read results.
+	// Every page in a segment range should have data from the overlay file.
+	int tcs_nr = 0;
+	for (int i = 0; i < req.segments_size; i++) {
+		struct mem_overlay_segment_req seg = req.segments[i];
+		tcs_nr += seg.end_pgoff - seg.start_pgoff + 1;
 	}
 
-	int ret;
-	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_REQ_CMD, &req);
-	if (ret) {
-		printf("ERROR: could not call 'IOCTL_MEM_OVERLAY_REQ_CMD': %s\n",
-		       strerror(errno));
-		res = EXIT_FAILURE;
-		goto close_syscall_dev;
+	struct test_case *tcs = calloc(sizeof(struct test_case), tcs_nr);
+	int tcs_n = 0;
+	for (int i = 0; i < req.segments_size; i++) {
+		struct mem_overlay_segment_req seg = req.segments[i];
+
+		for (int pgoff = seg.start_pgoff; pgoff <= seg.end_pgoff;
+		     pgoff++) {
+			tcs[tcs_n].pgoff = pgoff;
+			tcs[tcs_n].fd = overlay_fd;
+			tcs_n++;
+		}
 	}
 
-	// Verify reading memory.
-	int tcs_nr = 27;
-	struct test_case *tcs = malloc(sizeof(struct test_case) * tcs_nr);
-	tcs[0].pgoff = 0;
-	tcs[0].fd = overlay_fd;
-	tcs[1].pgoff = 4;
-	tcs[1].fd = overlay_fd;
-	tcs[2].pgoff = 5;
-	tcs[2].fd = overlay_fd;
-	tcs[3].pgoff = 6;
-	tcs[3].fd = overlay_fd;
-	tcs[4].pgoff = 20;
-	tcs[4].fd = overlay_fd;
-	tcs[5].pgoff = 21;
-	tcs[5].fd = overlay_fd;
-	for (int i = 6, j = 30; j <= 50; i++, j++) {
-		tcs[i].pgoff = j;
-		tcs[i].fd = overlay_fd;
-	}
-
+	// Verify memory overlays properly.
 	printf("= TEST: checking memory contents with overlay\n");
 	if (!verify_test_cases(tcs, tcs_nr, base_fd, base_mmap)) {
 		res = EXIT_FAILURE;
-		free(tcs);
-		goto cleanup;
+		goto free_tcs;
 	}
 	printf("== OK: overlay memory verification completed successfully!\n");
 
+	// Verify clean base map was not modified.
 	printf("= TEST: checking memory contents without overlay\n");
 	if (!verify_test_cases(NULL, 0, base_fd, clean_base_mmap)) {
 		res = EXIT_FAILURE;
-		free(tcs);
-		goto cleanup;
+		goto free_tcs;
 	}
-	free(tcs);
 	printf("== OK: non-overlay memory verification completed successfully!\n");
 
-	// TODO: parse /proc/<pid>/smaps to verify memory sharing.
+free_tcs:
+	free(tcs);
 
-	// Verify writing to memory.
+	struct mem_overlay_cleanup_req cleanup_req = {
+		.id = req.id,
+	};
+	if (call_kmod(IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req))
+		res = EXIT_FAILURE;
+free_segments:
+	free(req.segments);
+	munmap(overlay_mmap, TOTAL_SIZE);
+unmap_clean_base:
+	munmap(clean_base_mmap, TOTAL_SIZE);
+unmap_base:
+	munmap(base_mmap, TOTAL_SIZE);
+	close(base_fd);
+
+	return res;
+}
+
+int test_memory_write()
+{
+	clear_cache();
+	int res = EXIT_SUCCESS;
+
+	// Read base.bin test file and map it into memory.
+	int base_fd;
+	char *base_mmap;
+	if (mmap_file("base.bin", TOTAL_SIZE, &base_fd, &base_mmap)) {
+		return EXIT_FAILURE;
+	}
+
+	// Read overlay.bin test file and map it into memory.
+	int overlay_fd;
+	char *overlay_mmap;
+	if (mmap_file("overlay.bin", TOTAL_SIZE, &overlay_fd, &overlay_mmap)) {
+		res = EXIT_FAILURE;
+		goto unmap_base;
+	}
+
+	// Create test memory overlay request with an overlay that covers multiple
+	// pages so we can write in the middle of the area.
+	struct mem_overlay_req req;
+	req.base_addr = *(unsigned long *)(&base_mmap);
+	req.overlay_addr = *(unsigned long *)(&overlay_mmap);
+	req.segments_size = 1;
+	req.segments = calloc(sizeof(struct mem_overlay_segment_req),
+			      req.segments_size);
+
+	req.segments[0].start_pgoff = 4;
+	req.segments[0].end_pgoff = 6;
+
+	if (call_kmod(IOCTL_MEM_OVERLAY_REQ_CMD, &req)) {
+		res = EXIT_FAILURE;
+		goto free_segments;
+	};
+
+	// Write random data to different areas of the base memory map.
 	int rand_fd = open("/dev/random", O_RDONLY);
 	if (rand_fd < 0) {
 		printf("ERROR: could not open /dev/random: %d\n", rand_fd);
 		res = EXIT_FAILURE;
-		goto cleanup;
+		goto cleanup_kmod;
 	}
 
-	char *rand = malloc(page_size);
-	memset(rand, 0, page_size);
-	read(rand_fd, rand, page_size);
-	close(rand_fd);
+	char *rand = calloc(PAGE_SIZE, 1);
+	if (read(rand_fd, rand, PAGE_SIZE) < 0) {
+		printf("ERROR: failed to read /dev/random: %s\n",
+		       strerror(errno));
+		res = EXIT_FAILURE;
+		goto close_rand;
+	}
 
-	// Write to non-overlay page.
-	memcpy(base_mmap + page_size * 10, rand, page_size);
 	// Write to overlay page.
-	memcpy(base_mmap + page_size * 4, rand, page_size);
+	memcpy(base_mmap + PAGE_SIZE * 5, rand, PAGE_SIZE);
+	// Write to non-overlay page.
+	memcpy(base_mmap + PAGE_SIZE * 10, rand, PAGE_SIZE);
 
-	tcs_nr = 28;
-	tcs = malloc(sizeof(struct test_case) * tcs_nr);
-	tcs[0].pgoff = 0;
+	// Create expected results.
+	// Pages 5 and 10 should have the random data.
+	// Pages 4 and 6 should have overlay data.
+	int tcs_nr = 4;
+	struct test_case *tcs = calloc(sizeof(struct test_case), tcs_nr);
+	tcs[0].pgoff = 4;
 	tcs[0].fd = overlay_fd;
-	tcs[1].pgoff = 4;
+	tcs[1].pgoff = 5;
 	tcs[1].data = rand;
-	tcs[2].pgoff = 5;
+	tcs[2].pgoff = 6;
 	tcs[2].fd = overlay_fd;
-	tcs[3].pgoff = 6;
-	tcs[3].fd = overlay_fd;
-	tcs[4].pgoff = 10;
-	tcs[4].data = rand;
-	tcs[5].pgoff = 20;
-	tcs[5].fd = overlay_fd;
-	tcs[6].pgoff = 21;
-	tcs[6].fd = overlay_fd;
-	for (int i = 7, j = 30; j <= 50; i++, j++) {
-		tcs[i].pgoff = j;
-		tcs[i].fd = overlay_fd;
-	}
+	tcs[3].pgoff = 10;
+	tcs[3].data = rand;
 
 	printf("= TEST: checking memory write\n");
 	if (!verify_test_cases(tcs, tcs_nr, base_fd, base_mmap)) {
 		res = EXIT_FAILURE;
-		free(tcs);
-		free(rand);
-		goto cleanup;
+		goto free_tcs;
 	}
-	free(tcs);
-	free(rand);
 	printf("== OK: memory write verification completed successfully!\n");
 
-cleanup:
-	// Clean up memory overlay.
-	printf("calling IOCTL_MEM_OVERLAY_CLEANUP_CMD\n");
+free_tcs:
+	free(tcs);
+	free(rand);
+close_rand:
+	close(rand_fd);
+cleanup_kmod:;
 	struct mem_overlay_cleanup_req cleanup_req = {
 		.id = req.id,
 	};
-	ret = ioctl(syscall_dev, IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req);
-	if (ret) {
-		printf("ERROR: could not call 'IOCTL_MMAP_CMD': %s\n",
-		       strerror(errno));
+	if (call_kmod(IOCTL_MEM_OVERLAY_CLEANUP_CMD, &cleanup_req))
 		res = EXIT_FAILURE;
-	}
-close_syscall_dev:
-	close(syscall_dev);
-	printf("closed device driver\n");
 free_segments:
 	free(req.segments);
-	munmap(overlay_map, total_size);
-	printf("unmapped overlay file\n");
-close_overlay:
-	close(overlay_fd);
-	printf("closed overlay file\n");
+	munmap(overlay_mmap, TOTAL_SIZE);
 unmap_base:
-	munmap(clean_base_mmap, total_size);
-	printf("unmapped clean base file\n");
-	munmap(base_mmap, total_size);
-	printf("unmapped base file\n");
-close_base:
+	munmap(base_mmap, TOTAL_SIZE);
 	close(base_fd);
-	printf("closed base file\n");
 
-	printf("done\n");
 	return res;
+}
+
+int main()
+{
+	PAGE_SIZE = sysconf(_SC_PAGESIZE);
+	TOTAL_SIZE = PAGE_SIZE * 1024;
+	printf("Using pagesize %lu with total size %lu\n", PAGE_SIZE,
+	       TOTAL_SIZE);
+
+	if (test_memory_read())
+		return EXIT_FAILURE;
+	if (test_memory_write())
+		return EXIT_FAILURE;
+
+	// TODO: parse /proc/<pid>/smaps to verify memory sharing.
+
+	return EXIT_SUCCESS;
 }
